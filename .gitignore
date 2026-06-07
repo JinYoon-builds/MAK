@@ -1,0 +1,10 @@
+.DS_Store
+*.log
+
+# Local editor and OS metadata
+.idea/
+.vscode/
+
+# Temporary files
+tmp/
+*.tmp

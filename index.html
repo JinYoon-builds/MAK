@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MAK 대화형 발권 키오스크</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
+<link rel="stylesheet" href="kiosk.css" />
+</head>
+<body>
+<div class="stage">
+  <div class="stage-scroll">
+    <div class="fitbox" id="fitbox">
+      <div class="bezel-scaler" id="scaler">
+        <div class="bezel">
+        <div class="kiosk" id="kiosk">
+
+          <!-- ============ 1 · 목적지 듣기 ============ -->
+          <section class="screen is-active" data-screen="dest" data-screen-label="목적지 듣기">
+            <div class="topbar">
+              <span class="context"><span class="dot"></span><span class="path">서울역에서 출발</span></span>
+              <button class="help" data-go="staff"><span class="q">?</span>도움이 필요해요</button>
+            </div>
+
+            <div class="stack" style="margin-top:30px">
+              <div class="display">어디 가세요?</div>
+              <div class="display"><span class="g">말씀만 하세요</span></div>
+            </div>
+
+            <div class="char-stage"><img src="assets/mak-character-bust.png" alt="MAK 매표원" /></div>
+
+            <div class="voice" data-go="confirm" style="cursor:pointer">
+              <div class="mic">
+                <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div>
+                <div class="disc">
+                  <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
+                </div>
+              </div>
+              <div class="voice-text">
+                <div class="state"><span class="live-dot"></span>지금 듣고 있어요</div>
+                <div class="ex">예: “부산 가고 싶어요”</div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ============ 1 · 목적지 확인 ============ -->
+          <section class="screen" data-screen="confirm" data-screen-label="목적지 확인">
+            <div class="topbar">
+              <span class="context"><span class="dot"></span><span class="path">서울역에서 출발</span></span>
+              <button class="help" data-go="staff"><span class="q">?</span>도움이 필요해요</button>
+            </div>
+
+            <div class="stack gap-12" style="margin-top:30px">
+              <div class="eyebrow">이렇게 들었어요</div>
+              <div class="display"><span class="g">부산</span>, 맞으세요?</div>
+            </div>
+
+            <div class="char-stage"><img src="assets/mak-character-bust.png" alt="MAK 매표원" /></div>
+
+            <div class="stack gap-20">
+              <div class="hint center-x">“네” 또는 “아니요”라고 하셔도 돼요</div>
+              <div class="choice-row">
+                <button class="btn btn-primary btn-xl" style="flex:1.35" data-go="time">네, 맞아요</button>
+                <button class="btn btn-ghost btn-xl" data-go="dest">아니요<span class="sub">다시 말할게요</span></button>
+              </div>
+            </div>
+          </section>
+
+          <!-- ============ 2 · 시간 듣기 ============ -->
+          <section class="screen" data-screen="time" data-screen-label="시간 듣기">
+            <div class="topbar">
+              <span class="context"><span class="dot"></span><span class="path">서울역 <span class="muted">→</span> 부산</span></span>
+              <button class="help" data-go="staff"><span class="q">?</span>도움이 필요해요</button>
+            </div>
+
+            <div class="stack gap-12" style="margin-top:30px">
+              <div class="display">몇 시쯤</div>
+              <div class="display"><span class="g">떠나세요?</span></div>
+              <div class="lead" style="margin-top:6px">오늘 출발 기준이에요</div>
+            </div>
+
+            <div class="char-stage"><img src="assets/mak-character-bust.png" alt="MAK 매표원" /></div>
+
+            <div class="voice" data-go="summary" style="cursor:pointer">
+              <div class="mic">
+                <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div>
+                <div class="disc">
+                  <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
+                </div>
+              </div>
+              <div class="voice-text">
+                <div class="state"><span class="live-dot"></span>지금 듣고 있어요</div>
+                <div class="ex">예: “오후 3시쯤이요”</div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ============ 2 · 요약 확인 ============ -->
+          <section class="screen" data-screen="summary" data-screen-label="요약 확인">
+            <div class="topbar">
+              <span class="context"><span class="dot"></span><span class="path">서울역 <span class="muted">→</span> 부산 <span class="muted">·</span> 오후 3시쯤</span></span>
+              <button class="help" data-go="staff"><span class="q">?</span>도움이 필요해요</button>
+            </div>
+
+            <div class="stack gap-16" style="margin-top:30px">
+              <div class="eyebrow">이렇게 찾아드릴게요</div>
+              <div class="summary-card">
+                <p class="big"><span class="g" style="color:var(--green-deep)">부산</span>으로 오늘<br /><span class="g" style="color:var(--green-deep)">오후 3시쯤</span> 기차,<br />맞으세요?</p>
+              </div>
+            </div>
+
+            <div class="char-stage"><img src="assets/mak-character-bust.png" alt="MAK 매표원" /></div>
+
+            <div class="stack gap-20">
+              <div class="hint center-x">“네” 또는 “아니요”라고 하셔도 돼요</div>
+              <div class="choice-row">
+                <button class="btn btn-primary btn-xl" style="flex:1.35" data-go="searching">네, 맞아요</button>
+                <button class="btn btn-ghost btn-xl" data-go="time">아니요<span class="sub">다시 말할게요</span></button>
+              </div>
+            </div>
+          </section>
+
+          <!-- ============ 표 찾는 중 ============ -->
+          <section class="screen center" data-screen="searching" data-screen-label="표 찾는 중">
+            <div class="topbar" style="width:100%">
+              <span class="context"><span class="dot"></span><span class="path">서울역 <span class="muted">→</span> 부산 <span class="muted">·</span> 오후 3시쯤</span></span>
+              <button class="help" data-go="staff"><span class="q">?</span>도움이 필요해요</button>
+            </div>
+
+            <div class="seek-wrap">
+              <div class="char-fixed" style="height:430px"><img src="assets/mak-character-searching.png" alt="표를 찾는 매표원" style="height:100%" /></div>
+              <div class="title" style="margin-top:14px">가장 좋은 표를<br /><span class="g">찾아보는 중이에요</span></div>
+              <div class="lead" style="margin-top:16px">잠깐만 기다려 주세요</div>
+              <div class="seek-dots"><span></span><span></span><span></span></div>
+            </div>
+          </section>
+
+          <!-- ============ 3 · 결과 (빠른 거 / 싼 거) ============ -->
+          <section class="screen" data-screen="results" data-screen-label="결과">
+            <div class="topbar">
+              <span class="context"><span class="dot"></span><span class="path">서울역 <span class="muted">→</span> 부산 <span class="muted">·</span> 오후 3시쯤</span></span>
+              <button class="help" data-go="staff"><span class="q">?</span>도움이 필요해요</button>
+            </div>
+
+            <div class="stack gap-12" style="margin-top:28px">
+              <div class="eyebrow">두 가지로 추렸어요</div>
+              <div class="title">어느 게 <span class="g">좋으세요?</span></div>
+            </div>
+
+            <div class="char-stage"><img src="assets/mak-character-bust.png" alt="MAK 매표원" /></div>
+
+            <div class="options">
+              <div class="opt accent" data-go="done">
+                <span class="tag">제일 빨라요</span>
+                <div class="dep">오후 2:30</div>
+                <div class="meta">KTX · 2시간 48분</div>
+                <div class="price">59,800<small>원</small></div>
+              </div>
+              <div class="opt" data-go="done">
+                <span class="tag">제일 싸요</span>
+                <div class="dep">오후 3:10</div>
+                <div class="meta">무궁화호 · 5시간 25분</div>
+                <div class="price">28,600<small>원</small></div>
+              </div>
+            </div>
+
+            <div class="voice" style="justify-content:flex-start;margin-top:22px">
+              <div class="mic small">
+                <div class="ring r1"></div><div class="ring r2"></div>
+                <div class="disc">
+                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
+                </div>
+              </div>
+              <div class="hint">“빠른 거” 또는 “싼 거”라고 하셔도 돼요</div>
+            </div>
+          </section>
+
+          <!-- ============ 4 · 발권 완료 ============ -->
+          <section class="screen" data-screen="done" data-screen-label="발권 완료">
+            <div class="topbar">
+              <span class="context"><span class="dot"></span><span class="path">서울역 <span class="muted">→</span> 부산 <span class="muted">·</span> 발권 완료</span></span>
+              <button class="help" data-go="staff"><span class="q">?</span>도움이 필요해요</button>
+            </div>
+
+            <div class="stack gap-12" style="margin-top:28px">
+              <div class="display">표가 나왔어요!</div>
+              <div class="lead">아래에서 표를 받아가세요</div>
+            </div>
+
+            <div class="char-stage"><img src="assets/mak-character-bust.png" alt="MAK 매표원" /></div>
+
+            <div class="ticket">
+              <div class="head"><span class="route">서울 → 부산</span><span class="kind">KTX</span></div>
+              <div class="row2">
+                <span class="t">오늘 <b>오후 2:30</b></span>
+                <span class="seat">7호차 12A</span>
+                <span class="won">59,800원</span>
+              </div>
+            </div>
+
+            <div class="slot">
+              <svg class="arrow" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v15"/><path d="M5 12l7 7 7-7"/></svg>
+              <div class="txt">여기 깜빡이는 곳에서<br />표를 가져가세요</div>
+            </div>
+          </section>
+
+          <!-- ============ 안전망 · 먼저 말 걸기 ============ -->
+          <section class="screen" data-screen="nudge" data-screen-label="먼저 말 걸기">
+            <div class="topbar">
+              <span class="context"><span class="dot"></span><span class="path">서울역에서 출발</span></span>
+              <button class="help" data-go="staff"><span class="q">?</span>도움이 필요해요</button>
+            </div>
+
+            <div class="says" style="margin-top:30px">
+              <img class="avatar" src="assets/mak-character-bust.png" alt="MAK 매표원" />
+              <div class="bubble">천천히 말씀하셔도<br />괜찮아요.</div>
+            </div>
+
+            <div class="display" style="margin-top:34px">어디 가세요?</div>
+
+            <div class="char-stage"><img src="assets/mak-character-bust.png" alt="MAK 매표원" /></div>
+
+            <div class="voice" data-go="confirm" style="cursor:pointer">
+              <div class="mic">
+                <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div>
+                <div class="disc">
+                  <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
+                </div>
+              </div>
+              <div class="voice-text">
+                <div class="state"><span class="live-dot"></span>지금 듣고 있어요</div>
+                <div class="ex">예: “부산이요”</div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ============ 안전망 · 자리 비움 / 리셋 ============ -->
+          <section class="screen center" data-screen="idle" data-screen-label="자리 비움 확인">
+            <div class="topbar" style="width:100%">
+              <span class="context"><span class="dot"></span><span class="path">서울역에서 출발</span></span>
+              <button class="help" data-go="staff"><span class="q">?</span>도움이 필요해요</button>
+            </div>
+
+            <div class="seek-wrap">
+              <div class="char-fixed" style="height:280px"><img src="assets/mak-character-bust.png" alt="MAK 매표원" style="height:100%" /></div>
+              <div class="title" style="margin-top:18px">아직 <span class="g">계신가요?</span></div>
+              <div class="lead" style="margin-top:14px">잠시 후 처음 화면으로 돌아갈게요</div>
+              <div class="spinring" style="width:150px;height:150px;margin-top:34px">
+                <span id="idleCount" style="font-size:64px;font-weight:800;color:var(--green)">10</span>
+              </div>
+            </div>
+
+            <button class="btn btn-primary btn-xl btn-block" data-go="dest">네, 계속할게요</button>
+          </section>
+
+          <!-- ============ 안전망 · 되묻기 ============ -->
+          <section class="screen" data-screen="retry" data-screen-label="되묻기">
+            <div class="topbar">
+              <span class="context"><span class="dot"></span><span class="path">서울역에서 출발</span></span>
+              <button class="help" data-go="staff"><span class="q">?</span>도움이 필요해요</button>
+            </div>
+
+            <div class="stack gap-12" style="margin-top:30px">
+              <div class="eyebrow">제가 잘 못 들었어요</div>
+              <div class="display">한 번만 더</div>
+              <div class="display"><span class="g">말씀해 주세요</span></div>
+            </div>
+
+            <div class="char-stage"><img src="assets/mak-character-bust.png" alt="MAK 매표원" /></div>
+
+            <div class="voice" data-go="confirm" style="cursor:pointer">
+              <div class="mic">
+                <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div>
+                <div class="disc">
+                  <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
+                </div>
+              </div>
+              <div class="voice-text">
+                <div class="state"><span class="live-dot"></span>지금 듣고 있어요</div>
+                <div class="ex">천천히, “부산이요”</div>
+              </div>
+            </div>
+
+            <div class="attempts" style="margin-top:30px">
+              <span class="on"></span><span class="on"></span><span></span>
+            </div>
+          </section>
+
+          <!-- ============ 안전망 · 직원 연결 제안 ============ -->
+          <section class="screen" data-screen="staff" data-screen-label="직원 연결 제안">
+            <div class="topbar">
+              <span class="context"><span class="dot"></span><span class="path">서울역에서 출발</span></span>
+            </div>
+
+            <div class="stack gap-16" style="margin-top:30px">
+              <div class="title">제가 부족해서<br /><span class="g">잘 못 찾았어요.</span></div>
+              <div class="lead" style="font-size:32px;color:var(--ink)">직원이 바로 도와드릴게요.</div>
+            </div>
+
+            <div class="char-stage"><img src="assets/mak-character-bust.png" alt="MAK 매표원" /></div>
+
+            <div class="stack gap-16">
+              <button class="btn btn-primary btn-xl btn-block"><span class="bang">!</span>직원 부르기</button>
+              <button class="btn btn-ghost btn-lg btn-block" data-go="dest">다시 한 번 말해볼게요</button>
+            </div>
+          </section>
+
+        </div>
+      </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- demo controls (프로토타입 전용 · 실제 키오스크엔 없음) -->
+  <div class="controls">
+    <button class="nav-btn" id="prev" aria-label="이전">‹</button>
+    <div class="label"><span id="navLabel">목적지 듣기</span><small id="navIndex">정상 흐름 1 / 7</small></div>
+    <button class="nav-btn" id="next" aria-label="다음">›</button>
+    <div class="divider"></div>
+    <div class="chips">
+      <button class="chip" data-go="nudge">먼저 말 걸기</button>
+      <button class="chip" data-go="idle">자리 비움</button>
+      <button class="chip" data-go="retry">되묻기</button>
+      <button class="chip warn" data-go="staff">직원 연결</button>
+      <button class="chip" data-go="dest">↻ 처음으로</button>
+    </div>
+  </div>
+</div>
+
+<script src="kiosk-app.js"></script>
+</body>
+</html>
