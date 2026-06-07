@@ -16,8 +16,21 @@
         <div class="bezel">
         <div class="kiosk" id="kiosk">
 
+          <!-- ============ 0 · 시작하기 ============ -->
+          <section class="screen start-screen is-active" data-screen="start" data-screen-label="시작하기">
+            <div class="start-hero">
+              <div class="char-stage start-char"><img src="assets/mak-character-bust.png" alt="MAK 매표원" /></div>
+              <div class="stack gap-16 center-x">
+                <div class="display">말로 표를<br /><span class="g">찾아드릴게요</span></div>
+                <div class="lead">시작하면 마이크가 켜져요</div>
+              </div>
+              <button class="btn btn-primary btn-start" data-go="dest">시작하기</button>
+              <div class="hint center-x start-hint">iPad에서 마이크 권한을 물어보면 “허용”을 눌러주세요</div>
+            </div>
+          </section>
+
           <!-- ============ 1 · 목적지 듣기 ============ -->
-          <section class="screen is-active" data-screen="dest" data-screen-label="목적지 듣기">
+          <section class="screen" data-screen="dest" data-screen-label="목적지 듣기">
             <div class="topbar">
               <span class="context"><span class="dot"></span><span class="path">서울역에서 출발</span></span>
               <button class="help" data-go="staff"><span class="q">?</span>도움이 필요해요</button>
@@ -38,8 +51,8 @@
                 </div>
               </div>
               <div class="voice-text">
-                <div class="state"><span class="live-dot"></span>지금 듣고 있어요</div>
-                <div class="ex">예: “부산 가고 싶어요”</div>
+                <div class="state"><span class="live-dot"></span>자동으로 듣기 시작해요</div>
+                <div class="ex">예: “부산 오늘 오후 3시쯤”</div>
               </div>
             </div>
           </section>
@@ -53,13 +66,24 @@
 
             <div class="stack gap-12" style="margin-top:30px">
               <div class="eyebrow">이렇게 들었어요</div>
-              <div class="display"><span class="g">부산</span>, 맞으세요?</div>
+              <div class="display"><span class="g">부산역</span> 맞으세요?</div>
             </div>
 
             <div class="char-stage"><img src="assets/mak-character-bust.png" alt="MAK 매표원" /></div>
 
             <div class="stack gap-20">
-              <div class="hint center-x">“네” 또는 “아니요”라고 하셔도 돼요</div>
+              <div class="voice voice-compact" style="cursor:pointer">
+                <div class="mic small">
+                  <div class="ring r1"></div><div class="ring r2"></div>
+                  <div class="disc">
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
+                  </div>
+                </div>
+                <div class="voice-text">
+                  <div class="state"><span class="live-dot"></span>“네” 또는 “아니요”라고 말씀하세요</div>
+                  <div class="ex">터치로도 선택할 수 있어요</div>
+                </div>
+              </div>
               <div class="choice-row">
                 <button class="btn btn-primary btn-xl" style="flex:1.35" data-go="time">네, 맞아요</button>
                 <button class="btn btn-ghost btn-xl" data-go="dest">아니요<span class="sub">다시 말할게요</span></button>
@@ -90,7 +114,7 @@
                 </div>
               </div>
               <div class="voice-text">
-                <div class="state"><span class="live-dot"></span>지금 듣고 있어요</div>
+                <div class="state"><span class="live-dot"></span>자동으로 듣기 시작해요</div>
                 <div class="ex">예: “오후 3시쯤이요”</div>
               </div>
             </div>
@@ -113,7 +137,18 @@
             <div class="char-stage"><img src="assets/mak-character-bust.png" alt="MAK 매표원" /></div>
 
             <div class="stack gap-20">
-              <div class="hint center-x">“네” 또는 “아니요”라고 하셔도 돼요</div>
+              <div class="voice voice-compact" style="cursor:pointer">
+                <div class="mic small">
+                  <div class="ring r1"></div><div class="ring r2"></div>
+                  <div class="disc">
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
+                  </div>
+                </div>
+                <div class="voice-text">
+                  <div class="state"><span class="live-dot"></span>“네” 또는 “아니요”라고 말씀하세요</div>
+                  <div class="ex">터치로도 선택할 수 있어요</div>
+                </div>
+              </div>
               <div class="choice-row">
                 <button class="btn btn-primary btn-xl" style="flex:1.35" data-go="searching">네, 맞아요</button>
                 <button class="btn btn-ghost btn-xl" data-go="time">아니요<span class="sub">다시 말할게요</span></button>
@@ -172,8 +207,10 @@
                   <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
                 </div>
               </div>
-              <div class="hint">“빠른 거” 또는 “싼 거”라고 하셔도 돼요</div>
+              <div class="hint">“빠른 거”, “싼 거”, “다시 찾기”라고 하셔도 돼요</div>
             </div>
+
+            <button class="btn btn-ghost btn-lg btn-block retry-search" data-action="restart-search">다시 찾기</button>
           </section>
 
           <!-- ============ 4 · 발권 완료 ============ -->
@@ -229,7 +266,7 @@
                 </div>
               </div>
               <div class="voice-text">
-                <div class="state"><span class="live-dot"></span>지금 듣고 있어요</div>
+                <div class="state"><span class="live-dot"></span>자동으로 듣기 시작해요</div>
                 <div class="ex">예: “부산이요”</div>
               </div>
             </div>
@@ -277,7 +314,7 @@
                 </div>
               </div>
               <div class="voice-text">
-                <div class="state"><span class="live-dot"></span>지금 듣고 있어요</div>
+                <div class="state"><span class="live-dot"></span>자동으로 듣기 시작해요</div>
                 <div class="ex">천천히, “부산이요”</div>
               </div>
             </div>
@@ -306,6 +343,7 @@
             </div>
           </section>
 
+
         </div>
       </div>
       </div>
@@ -315,7 +353,7 @@
   <!-- demo controls (프로토타입 전용 · 실제 키오스크엔 없음) -->
   <div class="controls">
     <button class="nav-btn" id="prev" aria-label="이전">‹</button>
-    <div class="label"><span id="navLabel">목적지 듣기</span><small id="navIndex">정상 흐름 1 / 7</small></div>
+    <div class="label"><span id="navLabel">시작하기</span><small id="navIndex">테스트 시작 화면</small></div>
     <button class="nav-btn" id="next" aria-label="다음">›</button>
     <div class="divider"></div>
     <div class="chips">
@@ -328,6 +366,6 @@
   </div>
 </div>
 
-<script src="kiosk-app.js"></script>
+<script type="module" src="/src/main.ts"></script>
 </body>
 </html>

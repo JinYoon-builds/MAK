@@ -1,0 +1,31 @@
+{
+  "name": "mak-ticketing-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:web": "vite --host 0.0.0.0",
+    "dev:server": "tsx watch server/app.ts",
+    "build": "tsc --noEmit && vite build",
+    "start": "node dist-server/app.js",
+    "check": "tsc --noEmit",
+    "audio:fixed": "node scripts/generate-fixed-audio.mjs"
+  },
+  "dependencies": {
+    "@vitejs/plugin-basic-ssl": "latest",
+    "cors": "latest",
+    "dotenv": "latest",
+    "express": "latest",
+    "openai": "latest"
+  },
+  "devDependencies": {
+    "@types/cors": "latest",
+    "@types/express": "latest",
+    "@types/node": "latest",
+    "concurrently": "latest",
+    "tsx": "latest",
+    "typescript": "latest",
+    "vite": "latest"
+  }
+}
