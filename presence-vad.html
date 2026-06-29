@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MAK Presence VAD Demo</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #f6f7f4;
+        color: #152018;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+      }
+
+      main {
+        display: grid;
+        grid-template-columns: minmax(320px, 1fr) 380px;
+        gap: 20px;
+        width: min(1180px, calc(100vw - 32px));
+        margin: 0 auto;
+        padding: 24px 0;
+      }
+
+      .stage,
+      .panel,
+      .log {
+        border: 1px solid #d7ddd3;
+        border-radius: 8px;
+        background: #ffffff;
+      }
+
+      .stage {
+        overflow: hidden;
+      }
+
+      .video-wrap {
+        position: relative;
+        aspect-ratio: 16 / 10;
+        background: #0d130f;
+      }
+
+      video,
+      canvas {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      canvas {
+        pointer-events: none;
+      }
+
+      .banner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 18px 20px;
+        border-top: 1px solid #e1e6de;
+      }
+
+      .headline {
+        font-size: clamp(28px, 4vw, 52px);
+        font-weight: 850;
+        line-height: 1.05;
+        letter-spacing: 0;
+      }
+
+      .sub {
+        margin-top: 8px;
+        color: #627063;
+        font-size: 18px;
+      }
+
+      .state-pill {
+        min-width: 172px;
+        padding: 14px 16px;
+        border-radius: 8px;
+        text-align: center;
+        font-weight: 850;
+        background: #e8ece6;
+      }
+
+      .state-pill.listening {
+        background: #e0f2d8;
+        color: #23620f;
+      }
+
+      .state-pill.capturing {
+        background: #ffe6bf;
+        color: #7a4200;
+      }
+
+      .panel,
+      .log {
+        padding: 18px;
+      }
+
+      .grid {
+        display: grid;
+        gap: 14px;
+      }
+
+      .metric {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 12px;
+        border-radius: 8px;
+        background: #f7f8f5;
+      }
+
+      .dot {
+        width: 14px;
+        height: 14px;
+        border-radius: 999px;
+        background: #b9c0b6;
+      }
+
+      .dot.on {
+        background: #4fa52b;
+        box-shadow: 0 0 0 6px rgb(79 165 43 / 16%);
+      }
+
+      label {
+        display: grid;
+        gap: 8px;
+        font-size: 14px;
+        color: #4d584e;
+      }
+
+      input[type="range"] {
+        width: 100%;
+      }
+
+      button {
+        width: 100%;
+        min-height: 48px;
+        border: 0;
+        border-radius: 8px;
+        background: #315c2b;
+        color: white;
+        font: inherit;
+        font-weight: 800;
+        cursor: pointer;
+      }
+
+      button.secondary {
+        background: #e8ece6;
+        color: #233024;
+      }
+
+      .status {
+        min-height: 42px;
+        color: #6d5d25;
+      }
+
+      .log {
+        margin-top: 20px;
+      }
+
+      .log-list {
+        display: grid;
+        gap: 10px;
+        max-height: 280px;
+        overflow: auto;
+        padding: 0;
+        margin: 14px 0 0;
+        list-style: none;
+      }
+
+      .log-list li {
+        display: grid;
+        gap: 8px;
+        padding: 12px;
+        border-radius: 8px;
+        background: #f7f8f5;
+      }
+
+      audio {
+        width: 100%;
+      }
+
+      @media (max-width: 860px) {
+        main {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="stage">
+        <div class="video-wrap">
+          <video id="camera" autoplay muted playsinline></video>
+          <canvas id="overlay"></canvas>
+        </div>
+        <div class="banner">
+          <div>
+            <div id="headline" class="headline">어서 오세요</div>
+            <div id="sub" class="sub">카메라로 앞에 사람이 있는지 확인하고 있어요.</div>
+          </div>
+          <div id="statePill" class="state-pill">IDLE</div>
+        </div>
+      </section>
+
+      <aside>
+        <section class="panel grid">
+          <button id="startButton">카메라 시작</button>
+          <button id="stopButton" class="secondary">정지</button>
+          <div class="metric">
+            <span>personPresent</span>
+            <span id="presenceDot" class="dot" aria-label="person present"></span>
+          </div>
+          <div class="metric">
+            <span>감지 방식</span>
+            <strong id="detectorName">준비 중</strong>
+          </div>
+          <div class="metric">
+            <span>발화 개수</span>
+            <strong id="speechCount">0</strong>
+          </div>
+          <div class="metric">
+            <span>마지막 길이</span>
+            <strong id="lastDuration">-</strong>
+          </div>
+          <label>
+            들어옴 디바운스 <span id="enterValue">0.7초</span>
+            <input id="enterDebounce" type="range" min="200" max="2000" step="100" value="700" />
+          </label>
+          <label>
+            나감 디바운스 <span id="exitValue">2.0초</span>
+            <input id="exitDebounce" type="range" min="500" max="5000" step="100" value="2000" />
+          </label>
+          <label>
+            침묵 timeout <span id="silenceValue">2.2초</span>
+            <input id="silenceMs" type="range" min="700" max="3500" step="100" value="2200" />
+          </label>
+          <label>
+            최소 발화 <span id="minSpeechValue">0.45초</span>
+            <input id="minSpeechMs" type="range" min="100" max="1200" step="50" value="450" />
+          </label>
+          <label>
+            가까움 기준 <span id="closeValue">8%</span>
+            <input id="closeRatio" type="range" min="2" max="25" step="1" value="8" />
+          </label>
+          <div id="status" class="status"></div>
+        </section>
+
+        <section class="log">
+          <strong>발화 로그</strong>
+          <ul id="speechLog" class="log-list"></ul>
+        </section>
+      </aside>
+    </main>
+
+    <script type="module" src="/src/presenceVad.ts"></script>
+  </body>
+</html>
