@@ -1,6 +1,11 @@
 import { FaceDetector, FilesetResolver, type BoundingBox } from '@mediapipe/tasks-vision';
 import { MicVAD, utils } from '@ricky0123/vad-web';
 import type { RealTimeVADOptions } from '@ricky0123/vad-web';
+import {
+  loadVadCalibrationSettings,
+  saveVadCalibrationSettings,
+  type VadCalibrationSettings
+} from './vadSettings';
 
 type GateState = 'IDLE' | 'LISTENING' | 'CAPTURING';
 type DetectorMode = 'MediaPipe Face Detector' | 'Native FaceDetector' | 'unavailable';
@@ -45,12 +50,13 @@ const statusEl = getEl('status');
 const speechLog = getEl<HTMLUListElement>('speechLog');
 const startButton = getEl<HTMLButtonElement>('startButton');
 const stopButton = getEl<HTMLButtonElement>('stopButton');
+const calibrationSettings = loadVadCalibrationSettings();
 
-const enterDebounce = getRange('enterDebounce', 'enterValue', formatSeconds);
-const exitDebounce = getRange('exitDebounce', 'exitValue', formatSeconds);
-const silenceMs = getRange('silenceMs', 'silenceValue', formatSeconds);
-const minSpeechMs = getRange('minSpeechMs', 'minSpeechValue', (value) => `${(value / 1000).toFixed(2)}초`);
-const closeRatio = getRange('closeRatio', 'closeValue', (value) => `${value}%`);
+const enterDebounce = getRange('enterDebounce', 'enterValue', calibrationSettings.enterDebounceMs, formatSeconds);
+const exitDebounce = getRange('exitDebounce', 'exitValue', calibrationSettings.exitDebounceMs, formatSeconds);
+const silenceMs = getRange('silenceMs', 'silenceValue', calibrationSettings.silenceMs, formatSeconds);
+const minSpeechMs = getRange('minSpeechMs', 'minSpeechValue', calibrationSettings.minSpeechMs, (value) => `${(value / 1000).toFixed(2)}초`);
+const closeRatio = getRange('closeRatio', 'closeValue', calibrationSettings.closeRatioPercent, (value) => `${value}%`);
 
 let state: GateState = 'IDLE';
 let personPresent = false;
@@ -76,6 +82,9 @@ stopButton.addEventListener('click', () => {
 
 silenceMs.input.addEventListener('input', updateVadOptions);
 minSpeechMs.input.addEventListener('input', updateVadOptions);
+[enterDebounce, exitDebounce, silenceMs, minSpeechMs, closeRatio].forEach((range) => {
+  range.input.addEventListener('input', persistCalibrationSettings);
+});
 
 setStatus('카메라 시작을 누르면 로컬 감지를 시작합니다. 영상은 저장하거나 전송하지 않습니다.');
 render();
@@ -218,16 +227,29 @@ async function detectCloseFace() {
 
 async function setPersonPresent(next: boolean) {
   if (personPresent === next) return;
-  personPresent = next;
-  console.log(`[presence] personPresent=${next}`);
 
   if (next) {
-    await ensureVadStarted();
-    setState('LISTENING');
-    setStatus('사람이 감지되어 VAD를 켰습니다. 말씀하세요.');
+    personPresent = true;
+    console.log('[presence] personPresent=true');
+    setStatus('사람이 감지되었습니다. 마이크/VAD를 켜는 중입니다.');
+    try {
+      await ensureVadStarted();
+      setState('LISTENING');
+      setStatus('사람이 감지되어 VAD를 켰습니다. 말씀하세요.');
+    } catch (error) {
+      personPresent = false;
+      seenSince = 0;
+      missingSince = performance.now();
+      setState('IDLE');
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[vad] failed to start', error);
+      setStatus(`VAD 시작 실패: ${message}. 마이크 권한과 VAD asset 경로를 확인하세요.`);
+    }
     return;
   }
 
+  personPresent = false;
+  console.log('[presence] personPresent=false');
   setStatus('사람이 떠나 VAD를 끕니다.');
   await vad?.pause();
   setState('IDLE');
@@ -284,6 +306,21 @@ function updateVadOptions() {
     negativeSpeechThreshold: vadDefaults.negativeSpeechThreshold,
     preSpeechPadMs: vadDefaults.preSpeechPadMs
   });
+}
+
+function currentCalibrationSettings(): VadCalibrationSettings {
+  return {
+    enterDebounceMs: enterDebounce.value(),
+    exitDebounceMs: exitDebounce.value(),
+    silenceMs: silenceMs.value(),
+    minSpeechMs: minSpeechMs.value(),
+    closeRatioPercent: closeRatio.value()
+  };
+}
+
+function persistCalibrationSettings() {
+  saveVadCalibrationSettings(currentCalibrationSettings());
+  setStatus('설정값을 저장했습니다. 실제 키오스크 화면에서도 같은 값을 읽습니다.');
 }
 
 function handleSpeechEnd(audio: Float32Array) {
@@ -380,9 +417,10 @@ function getEl<T extends HTMLElement = HTMLElement>(id: string): T {
   return el as T;
 }
 
-function getRange(id: string, labelId: string, format: (value: number) => string) {
+function getRange(id: string, labelId: string, initialValue: number, format: (value: number) => string) {
   const input = getEl<HTMLInputElement>(id);
   const label = getEl(labelId);
+  input.value = String(initialValue);
   const read = () => Number(input.value);
   const sync = () => {
     label.textContent = format(read());

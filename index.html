@@ -13,19 +13,72 @@
   <div class="stage-scroll">
     <div class="fitbox" id="fitbox">
       <div class="bezel-scaler" id="scaler">
-        <div class="bezel">
-        <div class="kiosk" id="kiosk">
+	        <div class="bezel">
+		        <div class="kiosk" id="kiosk">
+		          <button class="settings-entry" id="settingsEntry" type="button" aria-label="설정 열기">
+		            <span aria-hidden="true">⚙</span>
+		          </button>
+		          <div class="settings-panel" id="settingsPinPanel" hidden>
+		            <form class="settings-dialog settings-pin-dialog" id="settingsPinForm" role="dialog" aria-modal="true" aria-labelledby="settingsPinTitle">
+		              <div class="settings-head">
+		                <h2 id="settingsPinTitle">설정 잠금</h2>
+		                <button class="settings-close" id="settingsPinClose" type="button" aria-label="닫기">×</button>
+		              </div>
+		              <label>
+		                비밀번호
+		                <input id="settingsPinInput" class="settings-pin-input" type="password" inputmode="numeric" autocomplete="off" maxlength="4" placeholder="4자리" />
+		              </label>
+		              <button class="settings-submit" type="submit">설정 열기</button>
+		              <p class="settings-note" id="settingsPinMessage">관리자 비밀번호를 입력하세요.</p>
+		            </form>
+		          </div>
+		          <div class="presence-debug" id="presenceDebug" aria-hidden="true">
+		            <video id="presenceDebugVideo" autoplay muted playsinline></video>
+		            <div class="presence-debug-meta">
+		              <span id="presenceDebugState">IDLE</span>
+		              <strong id="presenceDebugRatio">0%</strong>
+		            </div>
+		          </div>
+		          <div class="settings-panel" id="settingsPanel" hidden>
+		            <div class="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+		              <div class="settings-head">
+		                <h2 id="settingsTitle">감지 설정</h2>
+		                <button class="settings-close" id="settingsClose" type="button" aria-label="설정 닫기">×</button>
+		              </div>
+		              <label>
+		                가까움 기준 <span id="mainCloseValue">8%</span>
+		                <input id="mainCloseRatio" type="range" min="2" max="25" step="1" value="8" />
+		              </label>
+		              <label>
+		                들어옴 디바운스 <span id="mainEnterValue">0.7초</span>
+		                <input id="mainEnterDebounce" type="range" min="200" max="2000" step="100" value="700" />
+		              </label>
+		              <label>
+		                나감 디바운스 <span id="mainExitValue">2.0초</span>
+		                <input id="mainExitDebounce" type="range" min="500" max="5000" step="100" value="2000" />
+		              </label>
+		              <label>
+		                침묵 timeout <span id="mainSilenceValue">2.2초</span>
+		                <input id="mainSilenceMs" type="range" min="700" max="3500" step="100" value="2200" />
+		              </label>
+		              <label>
+		                최소 발화 <span id="mainMinSpeechValue">0.45초</span>
+		                <input id="mainMinSpeechMs" type="range" min="100" max="1200" step="50" value="450" />
+		              </label>
+		              <p class="settings-note" id="settingsSaved">설정값은 테스트 화면과 공유됩니다.</p>
+		            </div>
+		          </div>
 
-          <!-- ============ 0 · 시작하기 ============ -->
+		          <!-- ============ 0 · 시작하기 ============ -->
           <section class="screen start-screen is-active" data-screen="start" data-screen-label="시작하기">
             <div class="start-hero">
               <div class="char-stage start-char"><img src="assets/mak-character-bust.png" alt="MAK 매표원" /></div>
-              <div class="stack gap-16 center-x">
-                <div class="display">말로 표를<br /><span class="g">찾아드릴게요</span></div>
-                <div class="lead">시작하면 마이크가 켜져요</div>
-              </div>
-              <button class="btn btn-primary btn-start" data-go="dest">시작하기</button>
-              <div class="hint center-x start-hint">iPad에서 마이크 권한을 물어보면 “허용”을 눌러주세요</div>
+	              <div class="stack gap-16 center-x">
+	                <div class="display">말로 표를<br /><span class="g">찾아드릴게요</span></div>
+	                <div class="lead">앞에 서시면 먼저 말을 걸게요</div>
+	              </div>
+	              <button class="btn btn-primary btn-start" data-go="dest" hidden>시작하기</button>
+	              <div class="hint center-x start-hint">iPad에서 마이크 권한을 물어보면 “허용”을 눌러주세요</div>
             </div>
           </section>
 

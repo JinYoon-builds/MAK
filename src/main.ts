@@ -1,5 +1,7 @@
+import { FaceDetector, FilesetResolver, type BoundingBox } from '@mediapipe/tasks-vision';
 import { fixedPromptAudio, fixedScreenPrompts } from './prompts';
 import type { DialogTurnResult, KioskSession, ScreenId, TicketIntent, TrainCandidate } from './types';
+import { loadVadCalibrationSettings, saveVadCalibrationSettings, type VadCalibrationSettings } from './vadSettings';
 
 const HAPPY: ScreenId[] = ['start', 'dest', 'confirm', 'time', 'summary', 'searching', 'results', 'done'];
 const LABEL: Record<string, string> = {
@@ -19,6 +21,10 @@ const LABEL: Record<string, string> = {
 
 const KW = 810;
 const KH = 1440;
+const DETECTION_INTERVAL_MS = 150;
+const MEDIA_PIPE_WASM_PATH = '/vendor/mediapipe';
+const MEDIA_PIPE_FACE_MODEL =
+  'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite';
 
 const screens: Partial<Record<ScreenId, HTMLElement>> = {};
 document.querySelectorAll<HTMLElement>('.screen').forEach((el) => {
@@ -45,9 +51,117 @@ let autoListenTimer: number | undefined;
 let currentAssistantAudio: HTMLAudioElement | undefined;
 let speakGeneration = 0;
 const assistantPlaybackRate = 1.15;
+const audioOutputEnabled = false;
 const spokenScreenPrompts = new Set<string>();
 const autoListenedScreens = new Set<string>();
 let displayedTranscript = '';
+let isAnnouncing = false;
+let personPresent = false;
+let presenceGateStarted = false;
+let presenceGateStarting = false;
+let presenceCameraStream: MediaStream | undefined;
+let presenceVideo: HTMLVideoElement | undefined;
+let presenceDetector: FaceDetector | undefined;
+let presenceDetectionTimer: number | undefined;
+let presenceSeenSince = 0;
+let presenceMissingSince = 0;
+let presenceFaceRatioPercent = 0;
+let activeVoiceAbortController: AbortController | undefined;
+type MainSettingsRange = {
+  input: HTMLInputElement;
+  value: () => number;
+};
+
+function vadCalibrationSettings() {
+  return loadVadCalibrationSettings();
+}
+
+function initSettingsPanel() {
+  const entry = document.getElementById('settingsEntry') as HTMLButtonElement | null;
+  const panel = document.getElementById('settingsPanel') as HTMLElement | null;
+  const close = document.getElementById('settingsClose') as HTMLButtonElement | null;
+  const pinPanel = document.getElementById('settingsPinPanel') as HTMLElement | null;
+  const pinForm = document.getElementById('settingsPinForm') as HTMLFormElement | null;
+  const pinInput = document.getElementById('settingsPinInput') as HTMLInputElement | null;
+  const pinClose = document.getElementById('settingsPinClose') as HTMLButtonElement | null;
+  const pinMessage = document.getElementById('settingsPinMessage');
+  const saved = document.getElementById('settingsSaved');
+  if (!entry || !panel || !close || !pinPanel || !pinForm || !pinInput || !pinClose) return;
+
+  const settings = loadVadCalibrationSettings();
+  const closeRatio = bindSettingsRange('mainCloseRatio', 'mainCloseValue', settings.closeRatioPercent, (value) => `${value}%`);
+  const enterDebounce = bindSettingsRange('mainEnterDebounce', 'mainEnterValue', settings.enterDebounceMs, formatSeconds);
+  const exitDebounce = bindSettingsRange('mainExitDebounce', 'mainExitValue', settings.exitDebounceMs, formatSeconds);
+  const silenceMs = bindSettingsRange('mainSilenceMs', 'mainSilenceValue', settings.silenceMs, formatSeconds);
+  const minSpeechMs = bindSettingsRange('mainMinSpeechMs', 'mainMinSpeechValue', settings.minSpeechMs, (value) => `${(value / 1000).toFixed(2)}초`);
+  const ranges = [closeRatio, enterDebounce, exitDebounce, silenceMs, minSpeechMs].filter(Boolean) as MainSettingsRange[];
+
+  const persist = () => {
+    saveVadCalibrationSettings({
+      closeRatioPercent: closeRatio?.value() ?? settings.closeRatioPercent,
+      enterDebounceMs: enterDebounce?.value() ?? settings.enterDebounceMs,
+      exitDebounceMs: exitDebounce?.value() ?? settings.exitDebounceMs,
+      silenceMs: silenceMs?.value() ?? settings.silenceMs,
+      minSpeechMs: minSpeechMs?.value() ?? settings.minSpeechMs
+    });
+    if (saved) saved.textContent = '저장됨. 테스트 화면과 실제 화면에 함께 적용됩니다.';
+  };
+
+  ranges.forEach((range) => range.input.addEventListener('input', persist));
+  const closeAll = () => {
+    panel.hidden = true;
+    pinPanel.hidden = true;
+    pinInput.value = '';
+    if (pinMessage) pinMessage.textContent = '관리자 비밀번호를 입력하세요.';
+  };
+  entry.addEventListener('click', () => {
+    pinPanel.hidden = false;
+    window.setTimeout(() => pinInput.focus(), 0);
+  });
+  pinForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (pinInput.value === '0418') {
+      pinPanel.hidden = true;
+      pinInput.value = '';
+      panel.hidden = false;
+      if (pinMessage) pinMessage.textContent = '관리자 비밀번호를 입력하세요.';
+      return;
+    }
+    pinInput.value = '';
+    if (pinMessage) pinMessage.textContent = '비밀번호가 맞지 않습니다.';
+  });
+  pinClose.addEventListener('click', closeAll);
+  close.addEventListener('click', () => {
+    panel.hidden = true;
+  });
+  panel.addEventListener('click', (event) => {
+    if (event.target === panel) panel.hidden = true;
+  });
+  pinPanel.addEventListener('click', (event) => {
+    if (event.target === pinPanel) closeAll();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closeAll();
+  });
+}
+
+function bindSettingsRange(id: string, labelId: string, initialValue: number, format: (value: number) => string): MainSettingsRange | undefined {
+  const input = document.getElementById(id) as HTMLInputElement | null;
+  const label = document.getElementById(labelId);
+  if (!input || !label) return undefined;
+  input.value = String(initialValue);
+  const read = () => Number(input.value);
+  const sync = () => {
+    label.textContent = format(read());
+  };
+  input.addEventListener('input', sync);
+  sync();
+  return { input, value: read };
+}
+
+function formatSeconds(value: number) {
+  return `${(value / 1000).toFixed(1)}초`;
+}
 
 function todayLabel(date?: string) {
   if (!date) return '오늘';
@@ -140,13 +254,19 @@ function promptKey(id: ScreenId) {
 }
 
 async function announceScreenThenListen(id: ScreenId) {
+  void ensurePresenceGateStarted();
   if (id === 'start') return;
   const prompt = screenPrompt(id);
   const key = promptKey(id);
   if (prompt && !spokenScreenPrompts.has(key)) {
     spokenScreenPrompts.add(key);
     setVoiceStatus('먼저 안내해드릴게요');
-    await speakScreenPrompt(id, prompt);
+    isAnnouncing = true;
+    try {
+      await speakScreenPrompt(id, prompt);
+    } finally {
+      isAnnouncing = false;
+    }
   }
   if (state.currentScreen === id && !isBusy) scheduleAutoListen(id);
 }
@@ -157,6 +277,11 @@ function shouldAutoListen(id: ScreenId) {
 
 function scheduleAutoListen(id: ScreenId) {
   if (!shouldAutoListen(id)) return;
+  if (!personPresent) {
+    setVoiceStatus('앞에 서시면 자동으로 듣기 시작할게요');
+    return;
+  }
+  if (isAnnouncing) return;
   const key = `${id}:${state.transcriptHistory.length}:${state.intent.arrivalStation || ''}:${state.intent.timePreference?.time || state.intent.timePreference?.kind || ''}`;
   if (autoListenedScreens.has(key)) return;
   autoListenedScreens.add(key);
@@ -169,6 +294,138 @@ function scheduleAutoListen(id: ScreenId) {
 function showManualStartHint() {
   const message = '마이크를 한 번 눌러 시작해 주세요';
   setVoiceStatus(message);
+}
+
+async function ensurePresenceGateStarted() {
+  if (presenceGateStarted || presenceGateStarting) return;
+  presenceGateStarting = true;
+  try {
+    presenceVideo = document.getElementById('presenceDebugVideo') as HTMLVideoElement | null || document.createElement('video');
+    presenceVideo.muted = true;
+    presenceVideo.playsInline = true;
+    presenceVideo.setAttribute('aria-hidden', 'true');
+    if (!presenceVideo.isConnected) document.body.appendChild(presenceVideo);
+
+    presenceCameraStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        width: { ideal: 640 },
+        height: { ideal: 360 },
+        facingMode: 'user'
+      },
+      audio: false
+    });
+    presenceVideo.srcObject = presenceCameraStream;
+    await presenceVideo.play();
+    updatePresenceDebug();
+
+    const vision = await FilesetResolver.forVisionTasks(MEDIA_PIPE_WASM_PATH);
+    presenceDetector = await FaceDetector.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath: MEDIA_PIPE_FACE_MODEL,
+        delegate: 'CPU'
+      },
+      runningMode: 'VIDEO',
+      minDetectionConfidence: 0.5
+    });
+
+    presenceGateStarted = true;
+    presenceDetectionTimer = window.setInterval(() => {
+      void detectPresenceTick();
+    }, DETECTION_INTERVAL_MS);
+  } catch (error) {
+    console.warn('Presence gate failed. Falling back to manual mic controls.', error);
+    setVoiceStatus('카메라 감지가 어려워요. 마이크를 눌러 말씀해 주세요');
+    stopPresenceGate();
+  } finally {
+    presenceGateStarting = false;
+  }
+}
+
+function stopPresenceGate() {
+  if (presenceDetectionTimer) window.clearInterval(presenceDetectionTimer);
+  presenceDetectionTimer = undefined;
+  presenceDetector?.close();
+  presenceDetector = undefined;
+  presenceCameraStream?.getTracks().forEach((track) => track.stop());
+  presenceCameraStream = undefined;
+  if (presenceVideo && presenceVideo.id !== 'presenceDebugVideo') presenceVideo.remove();
+  presenceVideo = undefined;
+  presenceFaceRatioPercent = 0;
+  presenceGateStarted = false;
+  presenceSeenSince = 0;
+  presenceMissingSince = 0;
+  void setPersonPresent(false);
+}
+
+async function detectPresenceTick() {
+  const video = presenceVideo;
+  const detector = presenceDetector;
+  if (!video || !detector || !video.videoWidth || !video.videoHeight) return;
+
+  const detected = detectCloseFace(video, detector);
+  updatePresenceDebug();
+  const now = performance.now();
+  const settings = vadCalibrationSettings();
+  if (detected) {
+    if (!presenceSeenSince) presenceSeenSince = now;
+    presenceMissingSince = 0;
+    if (!personPresent && now - presenceSeenSince >= settings.enterDebounceMs) {
+      await setPersonPresent(true);
+    }
+  } else {
+    if (!presenceMissingSince) presenceMissingSince = now;
+    presenceSeenSince = 0;
+    if (personPresent && now - presenceMissingSince >= settings.exitDebounceMs) {
+      await setPersonPresent(false);
+    }
+  }
+}
+
+function detectCloseFace(video: HTMLVideoElement, detector: FaceDetector) {
+  try {
+    const result = detector.detectForVideo(video, performance.now());
+    const best = result.detections
+      .map((item) => item.boundingBox)
+      .filter((box): box is BoundingBox => Boolean(box))
+      .sort((a, b) => b.width * b.height - a.width * a.height)[0];
+    if (!best) {
+      presenceFaceRatioPercent = 0;
+      return false;
+    }
+    const frameArea = Math.max(1, video.videoWidth * video.videoHeight);
+    presenceFaceRatioPercent = ((best.width * best.height) / frameArea) * 100;
+    return presenceFaceRatioPercent >= vadCalibrationSettings().closeRatioPercent;
+  } catch (error) {
+    console.warn('Presence detection tick failed.', error);
+    presenceFaceRatioPercent = 0;
+    return false;
+  }
+}
+
+function updatePresenceDebug() {
+  const stateEl = document.getElementById('presenceDebugState');
+  const ratioEl = document.getElementById('presenceDebugRatio');
+  if (stateEl) stateEl.textContent = personPresent ? 'PRESENT' : presenceGateStarted ? 'SCANNING' : 'IDLE';
+  if (ratioEl) ratioEl.textContent = `${presenceFaceRatioPercent.toFixed(1)}%`;
+}
+
+async function setPersonPresent(next: boolean) {
+  if (personPresent === next) return;
+  personPresent = next;
+  console.log(`[presence-main] personPresent=${next}`);
+  updatePresenceDebug();
+
+  if (next) {
+    if (state.currentScreen === 'start') {
+      show('dest');
+      return;
+    }
+    if (shouldAutoListen(state.currentScreen) && !isBusy && !isAnnouncing) scheduleAutoListen(state.currentScreen);
+    return;
+  }
+
+  if (isBusy) activeVoiceAbortController?.abort();
+  if (shouldAutoListen(state.currentScreen)) setVoiceStatus('앞에 서시면 자동으로 듣기 시작할게요');
 }
 
 function runIdleCountdown() {
@@ -341,12 +598,14 @@ function selectCandidate(id: string) {
 async function handleVoiceTurn(options: { auto?: boolean } = {}) {
   if (isBusy) return;
   isBusy = true;
+  const abortController = new AbortController();
+  activeVoiceAbortController = abortController;
   displayedTranscript = '';
   stopAssistantVoice();
   await sleep(120);
   setVoiceStatus(options.auto ? '자동으로 듣기 시작할게요' : '듣고 있어요. 말씀해 주세요');
   try {
-    const transcript = await captureTranscriptRealtimeFirst();
+    const transcript = await captureTranscriptRealtimeFirst(abortController.signal);
     state.transcriptHistory.push(transcript);
     setVoiceStatus(`이렇게 들었어요: ${transcript}`);
     await sleep(350);
@@ -355,6 +614,10 @@ async function handleVoiceTurn(options: { auto?: boolean } = {}) {
   } catch (error) {
     console.error(error);
     const name = error instanceof DOMException ? error.name : '';
+    if (name === 'AbortError') {
+      setVoiceStatus('앞에 서시면 자동으로 듣기 시작할게요');
+      return;
+    }
     if (options.auto && (name === 'NotAllowedError' || name === 'SecurityError')) {
       showManualStartHint();
       return;
@@ -363,21 +626,24 @@ async function handleVoiceTurn(options: { auto?: boolean } = {}) {
     setVoiceStatus(options.auto ? '다시 말씀해 주세요' : '제가 잘 못 들었어요');
     show(state.retryCount >= 2 ? 'staff' : 'retry');
   } finally {
+    if (activeVoiceAbortController === abortController) activeVoiceAbortController = undefined;
     isBusy = false;
   }
 }
 
-async function captureTranscriptRealtimeFirst() {
+async function captureTranscriptRealtimeFirst(signal?: AbortSignal) {
+  throwIfAborted(signal);
   if ('RTCPeerConnection' in window && Boolean(navigator.mediaDevices?.getUserMedia)) {
     try {
-      return await captureRealtimeTranscript();
+      return await captureRealtimeTranscript(signal);
     } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') throw error;
       console.warn('Realtime transcription failed, falling back to file STT.', error);
       setVoiceStatus('실시간 연결이 어려워요. 짧게 녹음해서 다시 들을게요');
       await sleep(900);
     }
   }
-  return captureTranscript();
+  return captureTranscript(signal);
 }
 
 async function transcribeBlobWithFinalProvider(blob: Blob, realtimeTranscript: string) {
@@ -403,8 +669,10 @@ function preferredRecordingMimeType() {
   return candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) || '';
 }
 
-async function captureRealtimeTranscript() {
+async function captureRealtimeTranscript(signal?: AbortSignal) {
+  throwIfAborted(signal);
   setVoiceStatus('실시간 음성 연결 중이에요');
+  const vadSettings = vadCalibrationSettings();
   const pc = new RTCPeerConnection();
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: {
@@ -439,10 +707,15 @@ async function captureRealtimeTranscript() {
   const cleanup = () => {
     if (commitTimer) window.clearTimeout(commitTimer);
     if (hardStopTimer) window.clearTimeout(hardStopTimer);
+    signal?.removeEventListener('abort', abortListener);
     stream.getTracks().forEach((item) => item.stop());
     dc.close();
     pc.close();
   };
+  const abortListener = () => {
+    if (recorder.state !== 'inactive') recorder.stop();
+  };
+  signal?.addEventListener('abort', abortListener, { once: true });
 
   try {
     const realtimeTranscript = await new Promise<string>((resolve, reject) => {
@@ -452,6 +725,13 @@ async function captureRealtimeTranscript() {
         if (recorder.state !== 'inactive') recorder.stop();
         resolve(value.trim());
       };
+      const abort = () => {
+        if (completed) return;
+        completed = true;
+        if (recorder.state !== 'inactive') recorder.stop();
+        reject(new DOMException('Presence left while listening', 'AbortError'));
+      };
+      signal?.addEventListener('abort', abort, { once: true });
 
       dc.addEventListener('open', () => {
         setVoiceStatus('듣고 있어요. 말씀이 끝나면 바로 글자가 보여요');
@@ -460,10 +740,10 @@ async function captureRealtimeTranscript() {
           committed = true;
           setVoiceStatus(partial ? `확인 중: ${partial}` : serverDetectedSpeech ? '말씀을 확인하는 중이에요' : '아직 음성이 잘 안 들려요');
           if (serverDetectedSpeech) dc.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
-        }, 6500);
-        hardStopTimer = window.setTimeout(() => {
-          finish(realtimeCompletedTranscript || partial);
-        }, 10500);
+	        }, Math.max(4500, vadSettings.silenceMs + 4300));
+	        hardStopTimer = window.setTimeout(() => {
+	          finish(realtimeCompletedTranscript || partial);
+	        }, Math.max(8000, vadSettings.silenceMs + 8300));
       });
 
       dc.addEventListener('message', (event) => {
@@ -520,11 +800,12 @@ async function captureRealtimeTranscript() {
         .then(async () => {
           const offerSdp = pc.localDescription?.sdp;
           if (!offerSdp) throw new Error('Missing local SDP');
-          const response = await fetch('/api/realtime/call', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/sdp' },
-            body: offerSdp
-          });
+	          const response = await fetch(`/api/realtime/call?silenceDurationMs=${encodeURIComponent(String(vadSettings.silenceMs))}`, {
+	            method: 'POST',
+	            headers: { 'Content-Type': 'application/sdp' },
+	            body: offerSdp,
+	            signal
+	          });
           if (!response.ok) throw new Error(`Realtime session failed: ${response.status}`);
           const answerSdp = await response.text();
           await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
@@ -541,7 +822,8 @@ async function captureRealtimeTranscript() {
   }
 }
 
-async function captureTranscript() {
+async function captureTranscript(signal?: AbortSignal) {
+  throwIfAborted(signal);
   if (!navigator.mediaDevices || typeof MediaRecorder === 'undefined') {
     const text = window.prompt('마이크를 사용할 수 없어 텍스트로 입력해 주세요.')?.trim();
     if (!text) throw new Error('No transcript');
@@ -561,6 +843,7 @@ async function captureTranscript() {
   });
   recorder.start();
   for (let remaining = 5; remaining > 0; remaining -= 1) {
+    throwIfAborted(signal);
     setVoiceStatus(`${remaining}초 동안 듣고 있어요`);
     await sleep(1000);
   }
@@ -580,6 +863,10 @@ function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) throw new DOMException('Presence left while listening', 'AbortError');
+}
+
 function blobToBase64(blob: Blob) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -591,6 +878,10 @@ function blobToBase64(blob: Blob) {
 
 function setVoiceStatus(text: string) {
   const activeScreen = screens[state.currentScreen];
+  if (state.currentScreen === 'start') {
+    const lead = activeScreen?.querySelector<HTMLElement>('.lead');
+    if (lead) lead.textContent = text;
+  }
   const active = activeScreen?.querySelector<HTMLElement>('.voice-text .state');
   if (!active) return;
 
@@ -629,6 +920,7 @@ function normalizeVoiceDisplay(text: string) {
 }
 
 async function speakScreenPrompt(id: ScreenId, text: string) {
+  if (!audioOutputEnabled) return;
   const audioUrl = fixedPromptAudio[id];
   if (audioUrl) {
     await playAudioUrl(audioUrl);
@@ -838,6 +1130,7 @@ document.addEventListener('keydown', (event) => {
 
 window.addEventListener('resize', fit);
 initDemoMode();
+initSettingsPanel();
 fit();
 renderState();
 updateControls();

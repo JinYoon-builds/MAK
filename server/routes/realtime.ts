@@ -3,10 +3,17 @@ import { config, requireEnv } from '../config.js';
 
 export const realtimeRouter = Router();
 
+function clampSilenceDurationMs(value: unknown) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 700;
+  return Math.min(3500, Math.max(700, Math.round(n)));
+}
+
 realtimeRouter.post('/call', text({ type: ['application/sdp', 'text/plain'], limit: '1mb' }), async (req, res, next) => {
   try {
     requireEnv('OPENAI_API_KEY');
     const sdp = typeof req.body === 'string' ? req.body : '';
+    const silenceDurationMs = clampSilenceDurationMs(req.query.silenceDurationMs);
     if (!sdp.trim()) {
       res.status(400).json({ error: { code: 'BAD_REQUEST', message: 'SDP body is required' } });
       return;
@@ -24,12 +31,12 @@ realtimeRouter.post('/call', text({ type: ['application/sdp', 'text/plain'], lim
               model: config.openaiRealtimeTranscriptionModel,
               language: 'ko'
             },
-            turn_detection: {
-              type: 'server_vad',
-              threshold: 0.5,
-              prefix_padding_ms: 300,
-              silence_duration_ms: 700
-            }
+	            turn_detection: {
+	              type: 'server_vad',
+	              threshold: 0.5,
+	              prefix_padding_ms: 300,
+	              silence_duration_ms: silenceDurationMs
+	            }
           }
         }
       })
