@@ -4,6 +4,9 @@ export type VadCalibrationSettings = {
   silenceMs: number;
   minSpeechMs: number;
   closeRatioPercent: number;
+  lipMotionEnabled: boolean;
+  lipMotionThreshold: number;
+  lipMotionHoldMs: number;
 };
 
 export const VAD_SETTINGS_STORAGE_KEY = 'mak.vadCalibration.v1';
@@ -13,7 +16,10 @@ export const defaultVadCalibrationSettings: VadCalibrationSettings = {
   exitDebounceMs: 2000,
   silenceMs: 2200,
   minSpeechMs: 450,
-  closeRatioPercent: 8
+  closeRatioPercent: 8,
+  lipMotionEnabled: true,
+  lipMotionThreshold: 0.7,
+  lipMotionHoldMs: 900
 };
 
 export function loadVadCalibrationSettings(): VadCalibrationSettings {
@@ -37,7 +43,10 @@ export function normalizeVadCalibrationSettings(settings: Partial<VadCalibration
     exitDebounceMs: clampNumber(settings.exitDebounceMs, 500, 5000, defaultVadCalibrationSettings.exitDebounceMs),
     silenceMs: clampNumber(settings.silenceMs, 700, 3500, defaultVadCalibrationSettings.silenceMs),
     minSpeechMs: clampNumber(settings.minSpeechMs, 100, 1200, defaultVadCalibrationSettings.minSpeechMs),
-    closeRatioPercent: clampNumber(settings.closeRatioPercent, 2, 25, defaultVadCalibrationSettings.closeRatioPercent)
+    closeRatioPercent: clampNumber(settings.closeRatioPercent, 2, 25, defaultVadCalibrationSettings.closeRatioPercent),
+    lipMotionEnabled: typeof settings.lipMotionEnabled === 'boolean' ? settings.lipMotionEnabled : defaultVadCalibrationSettings.lipMotionEnabled,
+    lipMotionThreshold: clampNumber(settings.lipMotionThreshold, 0.1, 5, defaultVadCalibrationSettings.lipMotionThreshold),
+    lipMotionHoldMs: clampNumber(settings.lipMotionHoldMs, 300, 2000, defaultVadCalibrationSettings.lipMotionHoldMs)
   };
 }
 

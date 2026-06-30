@@ -156,6 +156,16 @@ body {
   width: 100%;
   accent-color: var(--green);
 }
+.settings-dialog .settings-check {
+  grid-template-columns: 28px 1fr;
+  align-items: center;
+  gap: 12px;
+}
+.settings-dialog .settings-check input {
+  width: 24px;
+  height: 24px;
+  accent-color: var(--green);
+}
 .settings-pin-dialog {
   max-width: 420px;
 }
@@ -225,6 +235,11 @@ body {
 }
 .presence-debug-meta strong {
   color: #8fed6a;
+}
+.presence-debug-meta small {
+  color: #bfeaff;
+  font-size: 13px;
+  font-weight: 800;
 }
 
 /* ---------- screens ---------- */

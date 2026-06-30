@@ -1,4 +1,4 @@
-import { FaceDetector, FilesetResolver, type BoundingBox } from '@mediapipe/tasks-vision';
+import { FaceDetector, FaceLandmarker, FilesetResolver, type BoundingBox, type NormalizedLandmark } from '@mediapipe/tasks-vision';
 import { MicVAD, utils } from '@ricky0123/vad-web';
 import type { RealTimeVADOptions } from '@ricky0123/vad-web';
 import {
@@ -24,9 +24,15 @@ const DETECTION_INTERVAL_MS = 150;
 const MEDIA_PIPE_WASM_PATH = '/vendor/mediapipe';
 const MEDIA_PIPE_FACE_MODEL =
   'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite';
+const MEDIA_PIPE_FACE_LANDMARKER_MODEL =
+  'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
 const VAD_ASSET_PATH = '/vendor/vad/';
 const ONNX_WASM_PATH = import.meta.env.DEV ? '/src/vendor/onnxruntime/' : '/vendor/onnxruntime/';
 const AUDIO_SAMPLE_RATE = 16000;
+const LIP_TOP = 13;
+const LIP_BOTTOM = 14;
+const LIP_LEFT = 61;
+const LIP_RIGHT = 291;
 
 const vadDefaults = {
   positiveSpeechThreshold: 0.46,
@@ -46,6 +52,7 @@ const presenceDot = getEl('presenceDot');
 const detectorName = getEl('detectorName');
 const speechCountEl = getEl('speechCount');
 const lastDurationEl = getEl('lastDuration');
+const lipMotionScoreEl = getEl('lipMotionScore');
 const statusEl = getEl('status');
 const speechLog = getEl<HTMLUListElement>('speechLog');
 const startButton = getEl<HTMLButtonElement>('startButton');
@@ -57,6 +64,10 @@ const exitDebounce = getRange('exitDebounce', 'exitValue', calibrationSettings.e
 const silenceMs = getRange('silenceMs', 'silenceValue', calibrationSettings.silenceMs, formatSeconds);
 const minSpeechMs = getRange('minSpeechMs', 'minSpeechValue', calibrationSettings.minSpeechMs, (value) => `${(value / 1000).toFixed(2)}초`);
 const closeRatio = getRange('closeRatio', 'closeValue', calibrationSettings.closeRatioPercent, (value) => `${value}%`);
+const lipMotionEnabled = getEl<HTMLInputElement>('lipMotionEnabled');
+const lipMotionThreshold = getRange('lipMotionThreshold', 'lipMotionThresholdValue', calibrationSettings.lipMotionThreshold, (value) => value.toFixed(1));
+const lipMotionHold = getRange('lipMotionHold', 'lipMotionHoldValue', calibrationSettings.lipMotionHoldMs, formatSeconds);
+lipMotionEnabled.checked = calibrationSettings.lipMotionEnabled;
 
 let state: GateState = 'IDLE';
 let personPresent = false;
@@ -67,10 +78,15 @@ let missingSince = 0;
 let speechCount = 0;
 let vad: MicVAD | undefined;
 let faceDetector: FaceDetector | undefined;
+let faceLandmarker: FaceLandmarker | undefined;
 let nativeFaceDetector: NativeFaceDetector | undefined;
 let detectorMode: DetectorMode = 'unavailable';
 let lastBox: BoundingBox | DOMRectReadOnly | undefined;
 let vadStarting = false;
+let lipMotionScore = 0;
+let previousMouthOpenness: number | undefined;
+let lastLipMotionAt = 0;
+let currentSpeechHasLipMotion = false;
 
 startButton.addEventListener('click', () => {
   void startDemo();
@@ -82,9 +98,10 @@ stopButton.addEventListener('click', () => {
 
 silenceMs.input.addEventListener('input', updateVadOptions);
 minSpeechMs.input.addEventListener('input', updateVadOptions);
-[enterDebounce, exitDebounce, silenceMs, minSpeechMs, closeRatio].forEach((range) => {
+[enterDebounce, exitDebounce, silenceMs, minSpeechMs, closeRatio, lipMotionThreshold, lipMotionHold].forEach((range) => {
   range.input.addEventListener('input', persistCalibrationSettings);
 });
+lipMotionEnabled.addEventListener('change', persistCalibrationSettings);
 
 setStatus('카메라 시작을 누르면 로컬 감지를 시작합니다. 영상은 저장하거나 전송하지 않습니다.');
 render();
@@ -121,6 +138,8 @@ async function stopDemo() {
   vad = undefined;
   faceDetector?.close();
   faceDetector = undefined;
+  faceLandmarker?.close();
+  faceLandmarker = undefined;
   cameraStream?.getTracks().forEach((track) => track.stop());
   cameraStream = undefined;
   video.srcObject = null;
@@ -128,6 +147,10 @@ async function stopDemo() {
   seenSince = 0;
   missingSince = 0;
   lastBox = undefined;
+  lipMotionScore = 0;
+  previousMouthOpenness = undefined;
+  lastLipMotionAt = 0;
+  currentSpeechHasLipMotion = false;
   setState('IDLE');
   setStatus('정지했습니다.');
   startButton.disabled = false;
@@ -146,8 +169,19 @@ async function initDetector() {
       runningMode: 'VIDEO',
       minDetectionConfidence: 0.5
     });
+    faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath: MEDIA_PIPE_FACE_LANDMARKER_MODEL,
+        delegate: 'CPU'
+      },
+      runningMode: 'VIDEO',
+      numFaces: 1,
+      minFaceDetectionConfidence: 0.5,
+      minFacePresenceConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
     detectorMode = 'MediaPipe Face Detector';
-    detectorName.textContent = detectorMode;
+    detectorName.textContent = `${detectorMode} + Lip`;
     return;
   } catch (error) {
     console.warn('[presence] MediaPipe face detector unavailable.', error);
@@ -172,6 +206,7 @@ async function detectPresenceTick() {
   resizeOverlay();
 
   const detected = await detectCloseFace();
+  updateLipMotion();
   const now = performance.now();
   if (detected) {
     if (!seenSince) seenSince = now;
@@ -189,6 +224,39 @@ async function detectPresenceTick() {
 
   drawOverlay(detected);
   render();
+}
+
+function updateLipMotion() {
+  if (!faceLandmarker) {
+    lipMotionScore = 0;
+    previousMouthOpenness = undefined;
+    lipMotionScoreEl.textContent = '미지원';
+    return;
+  }
+
+  try {
+    const result = faceLandmarker.detectForVideo(video, performance.now());
+    const landmarks = result.faceLandmarks[0];
+    if (!landmarks) {
+      lipMotionScore = 0;
+      previousMouthOpenness = undefined;
+      lipMotionScoreEl.textContent = '0.0';
+      return;
+    }
+
+    const openness = mouthOpenness(landmarks);
+    lipMotionScore = previousMouthOpenness === undefined ? 0 : Math.abs(openness - previousMouthOpenness) * 100;
+    previousMouthOpenness = openness;
+    if (lipMotionScore >= lipMotionThreshold.value()) {
+      lastLipMotionAt = performance.now();
+      if (state === 'CAPTURING') currentSpeechHasLipMotion = true;
+    }
+    lipMotionScoreEl.textContent = lipMotionScore.toFixed(1);
+  } catch (error) {
+    console.warn('[lip] detection tick failed.', error);
+    lipMotionScore = 0;
+    lipMotionScoreEl.textContent = '0.0';
+  }
 }
 
 async function detectCloseFace() {
@@ -273,8 +341,9 @@ async function ensureVadStarted() {
         submitUserSpeechOnPause: false,
         onSpeechStart: () => {
           console.log('[vad] speech start');
+          currentSpeechHasLipMotion = hasRecentLipMotion();
           setState('CAPTURING');
-          setStatus('발화 시작을 감지했습니다. 말씀이 끝날 때까지 녹음합니다.');
+          setStatus(currentSpeechHasLipMotion ? '발화 시작과 입 움직임을 함께 감지했습니다.' : 'VAD 발화 시작. 입 움직임 보조 판정을 기다립니다.');
         },
         onSpeechRealStart: () => {
           setState('CAPTURING');
@@ -314,7 +383,10 @@ function currentCalibrationSettings(): VadCalibrationSettings {
     exitDebounceMs: exitDebounce.value(),
     silenceMs: silenceMs.value(),
     minSpeechMs: minSpeechMs.value(),
-    closeRatioPercent: closeRatio.value()
+    closeRatioPercent: closeRatio.value(),
+    lipMotionEnabled: lipMotionEnabled.checked,
+    lipMotionThreshold: lipMotionThreshold.value(),
+    lipMotionHoldMs: lipMotionHold.value()
   };
 }
 
@@ -324,6 +396,13 @@ function persistCalibrationSettings() {
 }
 
 function handleSpeechEnd(audio: Float32Array) {
+  if (lipMotionEnabled.checked && faceLandmarker && !currentSpeechHasLipMotion && !hasRecentLipMotion()) {
+    console.log('[vad] speech ignored because no lip motion was observed');
+    setStatus('입 움직임이 없어 주변 소리로 보고 발화 출력을 무시했습니다.');
+    if (personPresent) setState('LISTENING');
+    return;
+  }
+
   const durationSec = audio.length / AUDIO_SAMPLE_RATE;
   const wav = utils.encodeWAV(audio, 3, AUDIO_SAMPLE_RATE, 1, 32);
   const blob = new Blob([wav], { type: 'audio/wav' });
@@ -344,6 +423,25 @@ function handleSpeechEnd(audio: Float32Array) {
 
   setStatus(`발화 감지됨, 길이 ${durationSec.toFixed(2)}초. 다음 발화를 기다립니다.`);
   if (personPresent) setState('LISTENING');
+}
+
+function hasRecentLipMotion() {
+  if (!lipMotionEnabled.checked) return true;
+  if (!faceLandmarker) return true;
+  return performance.now() - lastLipMotionAt <= lipMotionHold.value();
+}
+
+function mouthOpenness(landmarks: NormalizedLandmark[]) {
+  const top = landmarks[LIP_TOP];
+  const bottom = landmarks[LIP_BOTTOM];
+  const left = landmarks[LIP_LEFT];
+  const right = landmarks[LIP_RIGHT];
+  if (!top || !bottom || !left || !right) return 0;
+  return distance(top, bottom) / Math.max(distance(left, right), 0.001);
+}
+
+function distance(a: NormalizedLandmark, b: NormalizedLandmark) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
 function setState(next: GateState) {
@@ -385,6 +483,7 @@ function drawOverlay(rawDetected: boolean) {
   ctx.fillStyle = rawDetected ? '#70d34b' : '#f6bd38';
   ctx.font = '18px sans-serif';
   ctx.fillText(`${Math.round(boxAreaRatio(lastBox) * 100)}%`, x * scaleX, Math.max(24, y * scaleY - 8));
+  ctx.fillText(`lip ${lipMotionScore.toFixed(1)}`, x * scaleX, Math.max(48, y * scaleY + lastBox.height * scaleY + 24));
 }
 
 function resizeOverlay() {

@@ -19,6 +19,7 @@ export async function transcribeBase64Audio(input: { audioBase64: string; mimeTy
     file,
     model: config.openaiSttModel,
     language: 'ko',
+    prompt: config.openaiSttPrompt,
     response_format: 'json'
   } as any);
   return { text: result.text ?? '' };

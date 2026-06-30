@@ -37,6 +37,7 @@
 		            <div class="presence-debug-meta">
 		              <span id="presenceDebugState">IDLE</span>
 		              <strong id="presenceDebugRatio">0%</strong>
+		              <small id="presenceDebugLip">입 0.0</small>
 		            </div>
 		          </div>
 		          <div class="settings-panel" id="settingsPanel" hidden>
@@ -64,6 +65,18 @@
 		              <label>
 		                최소 발화 <span id="mainMinSpeechValue">0.45초</span>
 		                <input id="mainMinSpeechMs" type="range" min="100" max="1200" step="50" value="450" />
+		              </label>
+		              <label class="settings-check">
+		                <input id="mainLipMotionEnabled" type="checkbox" checked />
+		                입 움직임 보조 판정 사용
+		              </label>
+		              <label>
+		                입 움직임 민감도 <span id="mainLipMotionThresholdValue">0.7</span>
+		                <input id="mainLipMotionThreshold" type="range" min="0.1" max="5" step="0.1" value="0.7" />
+		              </label>
+		              <label>
+		                입 움직임 유지 <span id="mainLipMotionHoldValue">0.9초</span>
+		                <input id="mainLipMotionHold" type="range" min="300" max="2000" step="100" value="900" />
 		              </label>
 		              <p class="settings-note" id="settingsSaved">설정값은 테스트 화면과 공유됩니다.</p>
 		            </div>

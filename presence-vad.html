@@ -236,6 +236,10 @@
             <span>마지막 길이</span>
             <strong id="lastDuration">-</strong>
           </div>
+          <div class="metric">
+            <span>입 움직임 점수</span>
+            <strong id="lipMotionScore">0.0</strong>
+          </div>
           <label>
             들어옴 디바운스 <span id="enterValue">0.7초</span>
             <input id="enterDebounce" type="range" min="200" max="2000" step="100" value="700" />
@@ -255,6 +259,17 @@
           <label>
             가까움 기준 <span id="closeValue">8%</span>
             <input id="closeRatio" type="range" min="2" max="25" step="1" value="8" />
+          </label>
+          <label>
+            <span><input id="lipMotionEnabled" type="checkbox" checked /> 입 움직임 보조 판정</span>
+          </label>
+          <label>
+            입 움직임 민감도 <span id="lipMotionThresholdValue">0.7</span>
+            <input id="lipMotionThreshold" type="range" min="0.1" max="5" step="0.1" value="0.7" />
+          </label>
+          <label>
+            입 움직임 유지 <span id="lipMotionHoldValue">0.9초</span>
+            <input id="lipMotionHold" type="range" min="300" max="2000" step="100" value="900" />
           </label>
           <div class="metric">
             <span>저장 위치</span>
