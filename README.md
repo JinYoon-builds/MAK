@@ -110,6 +110,9 @@ http://localhost:5173/?demo=1
 
 자세한 설계와 원칙은 [docs/voice-capture.md](docs/voice-capture.md) 참고.
 
+UI/UX 개선 방향은 **두 축**(인풋: 깔끔한 발화 캡처 / 아웃풋: 인터랙티브한 반응 화면)으로 나눠
+[docs/ux-two-axes.md](docs/ux-two-axes.md)에 정리했습니다.
+
 ## 현재 제한 사항
 
 - 실제 결제 승인, 좌석 점유, 승차권 발권은 구현 범위 밖입니다.
