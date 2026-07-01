@@ -1,6 +1,7 @@
-import { FaceDetector, FaceLandmarker, FilesetResolver, type BoundingBox, type NormalizedLandmark } from '@mediapipe/tasks-vision';
+import { FaceDetector, FaceLandmarker, FilesetResolver, type BoundingBox, type Category, type NormalizedLandmark } from '@mediapipe/tasks-vision';
 import { MicVAD, utils } from '@ricky0123/vad-web';
 import type { RealTimeVADOptions } from '@ricky0123/vad-web';
+import { LipMotionTracker } from './lipMotion';
 import {
   loadVadCalibrationSettings,
   saveVadCalibrationSettings,
@@ -29,10 +30,6 @@ const MEDIA_PIPE_FACE_LANDMARKER_MODEL =
 const VAD_ASSET_PATH = '/vendor/vad/';
 const ONNX_WASM_PATH = import.meta.env.DEV ? '/src/vendor/onnxruntime/' : '/vendor/onnxruntime/';
 const AUDIO_SAMPLE_RATE = 16000;
-const LIP_TOP = 13;
-const LIP_BOTTOM = 14;
-const LIP_LEFT = 61;
-const LIP_RIGHT = 291;
 
 const vadDefaults = {
   positiveSpeechThreshold: 0.46,
@@ -84,9 +81,11 @@ let detectorMode: DetectorMode = 'unavailable';
 let lastBox: BoundingBox | DOMRectReadOnly | undefined;
 let vadStarting = false;
 let lipMotionScore = 0;
-let previousMouthOpenness: number | undefined;
+const lipMotionTracker = new LipMotionTracker();
 let lastLipMotionAt = 0;
 let currentSpeechHasLipMotion = false;
+let lipLandmarks: NormalizedLandmark[] | undefined;
+let lipReadout = '';
 
 startButton.addEventListener('click', () => {
   void startDemo();
@@ -148,7 +147,9 @@ async function stopDemo() {
   missingSince = 0;
   lastBox = undefined;
   lipMotionScore = 0;
-  previousMouthOpenness = undefined;
+  lipMotionTracker.reset();
+  lipLandmarks = undefined;
+  lipReadout = '';
   lastLipMotionAt = 0;
   currentSpeechHasLipMotion = false;
   setState('IDLE');
@@ -176,6 +177,7 @@ async function initDetector() {
       },
       runningMode: 'VIDEO',
       numFaces: 1,
+      outputFaceBlendshapes: true,
       minFaceDetectionConfidence: 0.5,
       minFacePresenceConfidence: 0.5,
       minTrackingConfidence: 0.5
@@ -229,24 +231,23 @@ async function detectPresenceTick() {
 function updateLipMotion() {
   if (!faceLandmarker) {
     lipMotionScore = 0;
-    previousMouthOpenness = undefined;
+    lipMotionTracker.reset();
+    lipLandmarks = undefined;
+    lipReadout = '';
     lipMotionScoreEl.textContent = '미지원';
     return;
   }
 
   try {
     const result = faceLandmarker.detectForVideo(video, performance.now());
-    const landmarks = result.faceLandmarks[0];
-    if (!landmarks) {
-      lipMotionScore = 0;
-      previousMouthOpenness = undefined;
+    const blendshapes = result.faceBlendshapes[0]?.categories;
+    lipLandmarks = result.faceLandmarks[0];
+    lipReadout = lipBlendshapeReadout(blendshapes);
+    lipMotionScore = lipMotionTracker.update(blendshapes, performance.now());
+    if (!blendshapes?.length) {
       lipMotionScoreEl.textContent = '0.0';
       return;
     }
-
-    const openness = mouthOpenness(landmarks);
-    lipMotionScore = previousMouthOpenness === undefined ? 0 : Math.abs(openness - previousMouthOpenness) * 100;
-    previousMouthOpenness = openness;
     if (lipMotionScore >= lipMotionThreshold.value()) {
       lastLipMotionAt = performance.now();
       if (state === 'CAPTURING') currentSpeechHasLipMotion = true;
@@ -255,8 +256,17 @@ function updateLipMotion() {
   } catch (error) {
     console.warn('[lip] detection tick failed.', error);
     lipMotionScore = 0;
+    lipLandmarks = undefined;
+    lipReadout = '';
     lipMotionScoreEl.textContent = '0.0';
   }
+}
+
+function lipBlendshapeReadout(categories?: Category[]): string {
+  if (!categories?.length) return '';
+  const pick = (name: string) => categories.find((category) => category.categoryName === name)?.score ?? 0;
+  const stretch = (pick('mouthStretchLeft') + pick('mouthStretchRight')) / 2;
+  return `jawOpen ${pick('jawOpen').toFixed(2)}  close ${pick('mouthClose').toFixed(2)}  pucker ${pick('mouthPucker').toFixed(2)}  stretch ${stretch.toFixed(2)}`;
 }
 
 async function detectCloseFace() {
@@ -431,19 +441,6 @@ function hasRecentLipMotion() {
   return performance.now() - lastLipMotionAt <= lipMotionHold.value();
 }
 
-function mouthOpenness(landmarks: NormalizedLandmark[]) {
-  const top = landmarks[LIP_TOP];
-  const bottom = landmarks[LIP_BOTTOM];
-  const left = landmarks[LIP_LEFT];
-  const right = landmarks[LIP_RIGHT];
-  if (!top || !bottom || !left || !right) return 0;
-  return distance(top, bottom) / Math.max(distance(left, right), 0.001);
-}
-
-function distance(a: NormalizedLandmark, b: NormalizedLandmark) {
-  return Math.hypot(a.x - b.x, a.y - b.y);
-}
-
 function setState(next: GateState) {
   if (state === next) return;
   console.log(`[state] ${state}→${next}`);
@@ -471,26 +468,130 @@ function render() {
 function drawOverlay(rawDetected: boolean) {
   if (!ctx) return;
   ctx.clearRect(0, 0, overlay.width, overlay.height);
-  if (!lastBox) return;
+  drawVideoFrame();
+  drawGeometryDebug();
+  drawLipLandmarks();
+  if (!lastBox || !video.videoWidth || !video.videoHeight) return;
 
-  const scaleX = overlay.width / video.videoWidth;
-  const scaleY = overlay.height / video.videoHeight;
+  const { scale, offsetX, offsetY } = coverMap();
+  const x = offsetX + boxX(lastBox) * scale;
+  const y = offsetY + boxY(lastBox) * scale;
+  const w = lastBox.width * scale;
+  const h = lastBox.height * scale;
   ctx.lineWidth = 4;
   ctx.strokeStyle = rawDetected ? '#70d34b' : '#f6bd38';
-  const x = boxX(lastBox);
-  const y = boxY(lastBox);
-  ctx.strokeRect(x * scaleX, y * scaleY, lastBox.width * scaleX, lastBox.height * scaleY);
+  ctx.strokeRect(x, y, w, h);
   ctx.fillStyle = rawDetected ? '#70d34b' : '#f6bd38';
   ctx.font = '18px sans-serif';
-  ctx.fillText(`${Math.round(boxAreaRatio(lastBox) * 100)}%`, x * scaleX, Math.max(24, y * scaleY - 8));
-  ctx.fillText(`lip ${lipMotionScore.toFixed(1)}`, x * scaleX, Math.max(48, y * scaleY + lastBox.height * scaleY + 24));
+  ctx.fillText(`${Math.round(boxAreaRatio(lastBox) * 100)}%`, x, Math.max(24, y - 8));
+  ctx.fillText(`lip ${lipMotionScore.toFixed(1)}`, x, y + h + 24);
+}
+
+function drawGeometryDebug() {
+  if (!ctx) return;
+  const rect = overlay.getBoundingClientRect();
+  const vrect = video.getBoundingClientRect();
+  const lines = [
+    `video intrinsic ${video.videoWidth}x${video.videoHeight}`,
+    `overlay buffer ${overlay.width}x${overlay.height}`,
+    `overlay rect ${Math.round(rect.width)}x${Math.round(rect.height)} @ ${Math.round(rect.left)},${Math.round(rect.top)}`,
+    `video rect ${Math.round(vrect.width)}x${Math.round(vrect.height)} @ ${Math.round(vrect.left)},${Math.round(vrect.top)}`,
+    `rect delta ${Math.round(vrect.left - rect.left)},${Math.round(vrect.top - rect.top)}`,
+    `dpr ${window.devicePixelRatio}`
+  ];
+  ctx.font = '14px monospace';
+  ctx.textBaseline = 'top';
+  let y = 10;
+  for (const line of lines) {
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(8, y - 2, ctx.measureText(line).width + 12, 18);
+    ctx.fillStyle = '#7CFC00';
+    ctx.fillText(line, 12, y);
+    y += 20;
+  }
+  // 캔버스 좌상단 기준점(0,0)과 중앙 십자: 비디오 영상의 같은 위치와 어긋나는지 눈으로 확인.
+  ctx.strokeStyle = '#00e5ff';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(1, 1, overlay.width - 2, overlay.height - 2);
+  ctx.beginPath();
+  ctx.moveTo(overlay.width / 2, 0);
+  ctx.lineTo(overlay.width / 2, overlay.height);
+  ctx.moveTo(0, overlay.height / 2);
+  ctx.lineTo(overlay.width, overlay.height / 2);
+  ctx.stroke();
+}
+
+const LIP_LANDMARK_INDICES = Array.from(
+  new Set(FaceLandmarker.FACE_LANDMARKS_LIPS.flatMap((connection) => [connection.start, connection.end]))
+);
+const EMPHASIZED_LIP_INDICES = new Set([13, 14, 61, 291]);
+
+function drawLipLandmarks() {
+  if (!ctx || !lipLandmarks || !video.videoWidth || !video.videoHeight) return;
+  const { scale, offsetX, offsetY, vW, vH } = coverMap();
+  const px = (point: NormalizedLandmark) => offsetX + point.x * vW * scale;
+  const py = (point: NormalizedLandmark) => offsetY + point.y * vH * scale;
+
+  // 입술 윤곽선
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = 'rgba(255, 59, 107, 0.5)';
+  ctx.beginPath();
+  for (const connection of FaceLandmarker.FACE_LANDMARKS_LIPS) {
+    const a = lipLandmarks[connection.start];
+    const b = lipLandmarks[connection.end];
+    if (!a || !b) continue;
+    ctx.moveTo(px(a), py(a));
+    ctx.lineTo(px(b), py(b));
+  }
+  ctx.stroke();
+
+  // 입술 좌표 점 전부 찍기. 점수 계산에 쓰는 세로/가로 끝점만 크게/노랗게 강조.
+  for (const index of LIP_LANDMARK_INDICES) {
+    const point = lipLandmarks[index];
+    if (!point) continue;
+    const emphasized = EMPHASIZED_LIP_INDICES.has(index);
+    ctx.fillStyle = emphasized ? '#ffd166' : '#ff3b6b';
+    ctx.beginPath();
+    ctx.arc(px(point), py(point), emphasized ? 4 : 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (lipReadout) {
+    ctx.fillStyle = '#ff3b6b';
+    ctx.font = '16px sans-serif';
+    ctx.fillText(lipReadout, 12, overlay.height - 16);
+  }
 }
 
 function resizeOverlay() {
-  const width = video.videoWidth || video.clientWidth;
-  const height = video.videoHeight || video.clientHeight;
-  if (overlay.width !== width) overlay.width = width;
-  if (overlay.height !== height) overlay.height = height;
+  // 캔버스 버퍼를 화면에 표시되는 CSS 픽셀 크기에 맞춘다. 그래야 cover 변환을 직접 계산해
+  // 비디오의 object-fit: cover 와 똑같이 좌표를 얹을 수 있다.
+  const rect = overlay.getBoundingClientRect();
+  const width = Math.round(rect.width) || video.clientWidth;
+  const height = Math.round(rect.height) || video.clientHeight;
+  if (width && overlay.width !== width) overlay.width = width;
+  if (height && overlay.height !== height) overlay.height = height;
+}
+
+// 비디오 프레임을 캔버스 버퍼에 object-fit: cover 로 직접 그린다. 그 동일한 변환으로 점도 찍으니
+// 프레임과 점이 같은 버퍼 좌표계를 공유해 정렬이 보장된다(비디오 엘리먼트 위치와 무관).
+function coverMap() {
+  const vW = video.videoWidth || 1;
+  const vH = video.videoHeight || 1;
+  const scale = Math.max(overlay.width / vW, overlay.height / vH);
+  return {
+    scale,
+    offsetX: (overlay.width - vW * scale) / 2,
+    offsetY: (overlay.height - vH * scale) / 2,
+    vW,
+    vH
+  };
+}
+
+function drawVideoFrame() {
+  if (!ctx || !video.videoWidth || !video.videoHeight) return;
+  const { scale, offsetX, offsetY, vW, vH } = coverMap();
+  ctx.drawImage(video, offsetX, offsetY, vW * scale, vH * scale);
 }
 
 function boxAreaRatio(box: BoundingBox | DOMRectReadOnly) {

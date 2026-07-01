@@ -1,4 +1,5 @@
-import { FaceDetector, FaceLandmarker, FilesetResolver, type BoundingBox, type NormalizedLandmark } from '@mediapipe/tasks-vision';
+import { FaceDetector, FaceLandmarker, FilesetResolver, type BoundingBox } from '@mediapipe/tasks-vision';
+import { LipMotionTracker } from './lipMotion';
 import { fixedPromptAudio, fixedScreenPrompts } from './prompts';
 import type { DialogTurnResult, KioskSession, ScreenId, TicketIntent, TrainCandidate } from './types';
 import { loadVadCalibrationSettings, saveVadCalibrationSettings, type VadCalibrationSettings } from './vadSettings';
@@ -27,10 +28,10 @@ const MEDIA_PIPE_FACE_MODEL =
   'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite';
 const MEDIA_PIPE_FACE_LANDMARKER_MODEL =
   'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
-const LIP_TOP = 13;
-const LIP_BOTTOM = 14;
-const LIP_LEFT = 61;
-const LIP_RIGHT = 291;
+// 발화 구간 동안 입술이 또렷이 추적됐는지 판단하는 기준.
+// 이 정도로 추적이 됐는데도 입이 정지였다면 '앞사람 침묵 + 주변 소리'로 본다.
+const LIP_TRACK_MIN_FRAMES = 4;
+const LIP_TRACK_MIN_RATIO = 0.6;
 
 const screens: Partial<Record<ScreenId, HTMLElement>> = {};
 document.querySelectorAll<HTMLElement>('.screen').forEach((el) => {
@@ -74,9 +75,11 @@ let presenceSeenSince = 0;
 let presenceMissingSince = 0;
 let presenceFaceRatioPercent = 0;
 let lipMotionScore = 0;
-let previousMouthOpenness: number | undefined;
+const lipMotionTracker = new LipMotionTracker();
 let lastLipMotionAt = 0;
 let voiceTurnLipMotionSeen = false;
+let voiceTurnFrames = 0;
+let voiceTurnTrackedFrames = 0;
 let activeVoiceAbortController: AbortController | undefined;
 type MainSettingsRange = {
   input: HTMLInputElement;
@@ -353,6 +356,7 @@ async function ensurePresenceGateStarted() {
       },
       runningMode: 'VIDEO',
       numFaces: 1,
+      outputFaceBlendshapes: true,
       minFaceDetectionConfidence: 0.5,
       minFacePresenceConfidence: 0.5,
       minTrackingConfidence: 0.5
@@ -384,7 +388,7 @@ function stopPresenceGate() {
   presenceVideo = undefined;
   presenceFaceRatioPercent = 0;
   lipMotionScore = 0;
-  previousMouthOpenness = undefined;
+  lipMotionTracker.reset();
   lastLipMotionAt = 0;
   presenceGateStarted = false;
   presenceSeenSince = 0;
@@ -451,42 +455,27 @@ function updateLipMotion(video: HTMLVideoElement) {
   const landmarker = presenceLandmarker;
   if (!landmarker) {
     lipMotionScore = 0;
-    previousMouthOpenness = undefined;
+    lipMotionTracker.reset();
     return;
   }
   try {
     const result = landmarker.detectForVideo(video, performance.now());
-    const landmarks = result.faceLandmarks[0];
-    if (!landmarks) {
-      lipMotionScore = 0;
-      previousMouthOpenness = undefined;
-      return;
+    const blendshapes = result.faceBlendshapes[0]?.categories;
+    const now = performance.now();
+    if (isBusy) {
+      voiceTurnFrames += 1;
+      if (blendshapes?.length) voiceTurnTrackedFrames += 1;
     }
-    const openness = mouthOpenness(landmarks);
-    lipMotionScore = previousMouthOpenness === undefined ? 0 : Math.abs(openness - previousMouthOpenness) * 100;
-    previousMouthOpenness = openness;
+    lipMotionScore = lipMotionTracker.update(blendshapes, now);
     const settings = vadCalibrationSettings();
     if (lipMotionScore >= settings.lipMotionThreshold) {
-      lastLipMotionAt = performance.now();
+      lastLipMotionAt = now;
       if (isBusy) voiceTurnLipMotionSeen = true;
     }
   } catch (error) {
     console.warn('Lip motion detection tick failed.', error);
     lipMotionScore = 0;
   }
-}
-
-function mouthOpenness(landmarks: NormalizedLandmark[]) {
-  const top = landmarks[LIP_TOP];
-  const bottom = landmarks[LIP_BOTTOM];
-  const left = landmarks[LIP_LEFT];
-  const right = landmarks[LIP_RIGHT];
-  if (!top || !bottom || !left || !right) return 0;
-  return distance(top, bottom) / Math.max(distance(left, right), 0.001);
-}
-
-function distance(a: NormalizedLandmark, b: NormalizedLandmark) {
-  return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
 function hasRecentLipMotion(settings = vadCalibrationSettings()) {
@@ -685,6 +674,8 @@ async function handleVoiceTurn(options: { auto?: boolean } = {}) {
   if (isBusy) return;
   isBusy = true;
   voiceTurnLipMotionSeen = hasRecentLipMotion();
+  voiceTurnFrames = 0;
+  voiceTurnTrackedFrames = 0;
   const abortController = new AbortController();
   activeVoiceAbortController = abortController;
   displayedTranscript = '';
@@ -693,8 +684,15 @@ async function handleVoiceTurn(options: { auto?: boolean } = {}) {
   setVoiceStatus(options.auto ? '자동으로 듣기 시작할게요' : '듣고 있어요. 말씀해 주세요');
   try {
     const transcript = await captureTranscriptRealtimeFirst(abortController.signal);
-    if (!voiceTurnLipMotionSeen && !hasRecentLipMotion()) {
-      setVoiceStatus('입 움직임이 없어 주변 소리로 보고 무시했어요');
+    const settings = vadCalibrationSettings();
+    const lipMoved = voiceTurnLipMotionSeen || hasRecentLipMotion();
+    const trackedRatio = voiceTurnFrames > 0 ? voiceTurnTrackedFrames / voiceTurnFrames : 0;
+    const reliablyTracked = voiceTurnFrames >= LIP_TRACK_MIN_FRAMES && trackedRatio >= LIP_TRACK_MIN_RATIO;
+    // 입술이 또렷이 추적됐는데도 발화 구간 내내 정지였을 때만 = 앞사람은 가만히 있고 주변 소리가
+    // 들어온 것으로 보고 조용히 흘려보낸다. 추적이 부실했으면(마스크·역광·고개 돌림 등) 묵살하지 않고
+    // 그대로 진행해, 뒤따르는 확인 단계에서 사용자가 직접 바로잡게 한다.
+    if (settings.lipMotionEnabled && presenceLandmarker && !lipMoved && reliablyTracked) {
+      setVoiceStatus('입 움직임이 없어 주변 소리로 보고 넘어갔어요');
       if (personPresent) {
         isBusy = false;
         autoListenedScreens.clear();

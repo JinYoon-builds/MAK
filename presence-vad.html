@@ -59,6 +59,12 @@
 
       canvas {
         pointer-events: none;
+        object-fit: fill;
+      }
+
+      /* 비디오 프레임은 캔버스에 직접 그린다. 원본 <video>는 디코딩만 하고 화면에선 숨긴다. */
+      #camera {
+        opacity: 0;
       }
 
       .banner {
