@@ -28,10 +28,13 @@ const MEDIA_PIPE_FACE_MODEL =
   'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite';
 const MEDIA_PIPE_FACE_LANDMARKER_MODEL =
   'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
-// 발화 구간 동안 입술이 또렷이 추적됐는지 판단하는 기준.
-// 이 정도로 추적이 됐는데도 입이 정지였다면 '앞사람 침묵 + 주변 소리'로 본다.
+// 발화 구간 동안 얼굴이 실제로 프레임 안에 있었는지(입을 관찰할 기회가 있었는지) 기준.
 const LIP_TRACK_MIN_FRAMES = 4;
 const LIP_TRACK_MIN_RATIO = 0.6;
+// 폐기는 "입이 완전히 정지"였을 때만 한다. 발화 임계값(lipMotionThreshold)에는 못 미쳐도
+// 이 정도의 약한 출렁임이라도 있었다면 = 마스크·역광으로 억눌린 실제 발화일 수 있으므로
+// 폐기하지 않고 통과시켜 확인 단계에서 정정하게 한다. (거짓 무시가 거짓 통과보다 비싸다.)
+const LIP_STILL_FLOOR = 0.15;
 
 const screens: Partial<Record<ScreenId, HTMLElement>> = {};
 document.querySelectorAll<HTMLElement>('.screen').forEach((el) => {
@@ -80,6 +83,7 @@ let lastLipMotionAt = 0;
 let voiceTurnLipMotionSeen = false;
 let voiceTurnFrames = 0;
 let voiceTurnTrackedFrames = 0;
+let voiceTurnPeakLipScore = 0;
 let activeVoiceAbortController: AbortController | undefined;
 type MainSettingsRange = {
   input: HTMLInputElement;
@@ -462,11 +466,13 @@ function updateLipMotion(video: HTMLVideoElement) {
     const result = landmarker.detectForVideo(video, performance.now());
     const blendshapes = result.faceBlendshapes[0]?.categories;
     const now = performance.now();
+    lipMotionScore = lipMotionTracker.update(blendshapes, now);
     if (isBusy) {
       voiceTurnFrames += 1;
       if (blendshapes?.length) voiceTurnTrackedFrames += 1;
+      // 발화 구간 중 가장 큰 입 움직임. 마스크로 억눌린 약한 출렁임까지 여기 반영된다.
+      voiceTurnPeakLipScore = Math.max(voiceTurnPeakLipScore, lipMotionScore);
     }
-    lipMotionScore = lipMotionTracker.update(blendshapes, now);
     const settings = vadCalibrationSettings();
     if (lipMotionScore >= settings.lipMotionThreshold) {
       lastLipMotionAt = now;
@@ -676,6 +682,7 @@ async function handleVoiceTurn(options: { auto?: boolean } = {}) {
   voiceTurnLipMotionSeen = hasRecentLipMotion();
   voiceTurnFrames = 0;
   voiceTurnTrackedFrames = 0;
+  voiceTurnPeakLipScore = 0;
   const abortController = new AbortController();
   activeVoiceAbortController = abortController;
   displayedTranscript = '';
@@ -687,11 +694,14 @@ async function handleVoiceTurn(options: { auto?: boolean } = {}) {
     const settings = vadCalibrationSettings();
     const lipMoved = voiceTurnLipMotionSeen || hasRecentLipMotion();
     const trackedRatio = voiceTurnFrames > 0 ? voiceTurnTrackedFrames / voiceTurnFrames : 0;
-    const reliablyTracked = voiceTurnFrames >= LIP_TRACK_MIN_FRAMES && trackedRatio >= LIP_TRACK_MIN_RATIO;
-    // 입술이 또렷이 추적됐는데도 발화 구간 내내 정지였을 때만 = 앞사람은 가만히 있고 주변 소리가
-    // 들어온 것으로 보고 조용히 흘려보낸다. 추적이 부실했으면(마스크·역광·고개 돌림 등) 묵살하지 않고
-    // 그대로 진행해, 뒤따르는 확인 단계에서 사용자가 직접 바로잡게 한다.
-    if (settings.lipMotionEnabled && presenceLandmarker && !lipMoved && reliablyTracked) {
+    const faceObserved = voiceTurnFrames >= LIP_TRACK_MIN_FRAMES && trackedRatio >= LIP_TRACK_MIN_RATIO;
+    // 발화 구간 내내 입이 "완전히" 정지였는가. 발화 임계값엔 못 미쳐도 약한 출렁임(마스크·역광으로
+    // 억눌린 실제 발화의 흔적)이 있었으면 정지로 보지 않는다.
+    const mouthFullyStill = voiceTurnPeakLipScore < LIP_STILL_FLOOR;
+    // 얼굴이 관찰됐는데 입이 완전히 정지였을 때만 = 앞사람은 가만히 있고 주변 소리가 들어온 것으로
+    // 보고 조용히 흘려보낸다. 약한 움직임이라도 있었거나(마스크 가능성) 얼굴 관찰이 부실했으면
+    // 묵살하지 않고 그대로 진행해, 뒤따르는 확인 단계에서 사용자가 직접 바로잡게 한다.
+    if (settings.lipMotionEnabled && presenceLandmarker && !lipMoved && faceObserved && mouthFullyStill) {
       setVoiceStatus('입 움직임이 없어 주변 소리로 보고 넘어갔어요');
       if (personPresent) {
         isBusy = false;
