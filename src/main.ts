@@ -35,6 +35,13 @@ const LIP_TRACK_MIN_RATIO = 0.6;
 // 이 정도의 약한 출렁임이라도 있었다면 = 마스크·역광으로 억눌린 실제 발화일 수 있으므로
 // 폐기하지 않고 통과시켜 확인 단계에서 정정하게 한다. (거짓 무시가 거짓 통과보다 비싸다.)
 const LIP_STILL_FLOOR = 0.15;
+// 안내(TTS) 도중 앞사람이 말을 시작하면(입술이 이만큼 연속 틱 움직이면) 안내를 끊고 즉시
+// 청취로 넘어간다(barge-in). 판정은 카메라(입술)만으로 하므로 키오스크 자기 TTS가 마이크로
+// 새어 들어와도 barge-in을 일으키지 못한다.
+const BARGE_IN_MIN_TICKS = 2;
+// 발화 캡처 중엔 고개를 숙이거나 돌려 얼굴이 잠깐 사라져도 이 시간까진 턴을 끊지 않는다.
+// 진짜 떠났으면 오디오가 조용해져 서버 엔드포인팅이 자연히 턴을 닫는다.
+const CAPTURE_PRESENCE_GRACE_MS = 6000;
 
 const screens: Partial<Record<ScreenId, HTMLElement>> = {};
 document.querySelectorAll<HTMLElement>('.screen').forEach((el) => {
@@ -84,6 +91,7 @@ let voiceTurnLipMotionSeen = false;
 let voiceTurnFrames = 0;
 let voiceTurnTrackedFrames = 0;
 let voiceTurnPeakLipScore = 0;
+let bargeInLipStreak = 0;
 let activeVoiceAbortController: AbortController | undefined;
 type MainSettingsRange = {
   input: HTMLInputElement;
@@ -317,6 +325,29 @@ function scheduleAutoListen(id: ScreenId) {
   }, 0);
 }
 
+// 안내(TTS) 중 앞사람이 말을 시작하면(입술 onset) 안내를 끊고 즉시 청취로 전환한다.
+// 판정은 카메라(입술)만으로 하므로 키오스크 자기 TTS가 마이크로 새어도 barge-in을 일으키지 않는다.
+// handleVoiceTurn 첫머리의 stopAssistantVoice()가 안내를 끊어 isAnnouncing도 정상 해제된다.
+function maybeBargeIn() {
+  const settings = vadCalibrationSettings();
+  const eligible =
+    isAnnouncing &&
+    !isBusy &&
+    personPresent &&
+    settings.lipMotionEnabled &&
+    Boolean(presenceLandmarker) &&
+    shouldAutoListen(state.currentScreen);
+  if (!eligible || lipMotionScore < settings.lipMotionThreshold) {
+    bargeInLipStreak = 0;
+    return;
+  }
+  bargeInLipStreak += 1;
+  if (bargeInLipStreak >= BARGE_IN_MIN_TICKS) {
+    bargeInLipStreak = 0;
+    void handleVoiceTurn({ auto: true });
+  }
+}
+
 function showManualStartHint() {
   const message = '마이크를 한 번 눌러 시작해 주세요';
   setVoiceStatus(message);
@@ -407,6 +438,7 @@ async function detectPresenceTick() {
 
   const detected = detectCloseFace(video, detector);
   updateLipMotion(video);
+  maybeBargeIn();
   updatePresenceDebug();
   const now = performance.now();
   const settings = vadCalibrationSettings();
@@ -419,7 +451,11 @@ async function detectPresenceTick() {
   } else {
     if (!presenceMissingSince) presenceMissingSince = now;
     presenceSeenSince = 0;
-    if (personPresent && now - presenceMissingSince >= settings.exitDebounceMs) {
+    // 발화 캡처 중엔 얼굴이 잠깐 사라져도(고개 숙임·돌림) 유예를 크게 줘 턴을 안 끊는다.
+    const exitDebounce = isBusy
+      ? Math.max(settings.exitDebounceMs, CAPTURE_PRESENCE_GRACE_MS)
+      : settings.exitDebounceMs;
+    if (personPresent && now - presenceMissingSince >= exitDebounce) {
       await setPersonPresent(false);
     }
   }
@@ -934,7 +970,13 @@ async function captureTranscript(signal?: AbortSignal) {
     if (!text) throw new Error('No transcript');
     return text;
   }
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true
+    }
+  });
   const chunks: BlobPart[] = [];
   const recorder = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : undefined });
   recorder.ondataavailable = (event) => {
